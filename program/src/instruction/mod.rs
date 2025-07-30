@@ -1,8 +1,10 @@
 use pinocchio::program_error::ProgramError;
 
 pub mod initialize;
+pub mod move_stake;
 
 pub use initialize::*;
+pub use move_stake::*;
 
 #[repr(u8)]
 #[repr(u8)]
