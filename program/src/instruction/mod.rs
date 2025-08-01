@@ -1,10 +1,11 @@
 use pinocchio::program_error::ProgramError;
 
 pub mod initialize;
+pub mod split;
 
 pub use initialize::*;
+pub use split::*;
 
-#[repr(u8)]
 #[repr(u8)]
 pub enum StakeInstruction {
     Initialize,
@@ -56,4 +57,3 @@ impl TryFrom<&u8> for StakeInstruction {
         }
     }
 }
-

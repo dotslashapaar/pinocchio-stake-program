@@ -1,7 +1,9 @@
-use pinocchio::{
-    account_info::AccountInfo,
-    pubkey::Pubkey,
-};
+use core::mem::size_of;
+use pinocchio::pubkey::Pubkey;
+
+// Constants for fixed-size arrays
+pub const MAX_STAKE_HISTORY_ENTRIES: usize = 512;
+pub const MAX_AUTHORITY_SEED_LEN: usize = 32;
 
 #[repr(u8)]
 pub enum StakeState {
@@ -15,7 +17,7 @@ pub enum StakeState {
     Stake = 2,
 
     /// Account represents rewards that were distributed to stake accounts
-    RewardsPool = 3
+    RewardsPool = 3,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -32,19 +34,19 @@ impl Meta {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
 #[repr(C)]
+#[derive(Default, Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Authorized {
     /// Authority to manage the stake account (delegate, deactivate, split, merge)
     pub staker: Pubkey,
 
     /// Authority to withdraw funds from the stake account
-    pub withdrawer: Pubkey
+    pub withdrawer: Pubkey,
 }
 
 impl Authorized {
     pub const fn size() -> usize {
-        8 + std::mem::size_of::<Authorized>()
+        8 + size_of::<Authorized>()
     }
 
     pub fn new(staker: Pubkey, withdrawer: Pubkey) -> Self {
@@ -81,7 +83,7 @@ impl Lockup {
         Self {
             unix_timestamp,
             epoch,
-            custodian
+            custodian,
         }
     }
 
@@ -109,7 +111,7 @@ pub struct Delegation {
     pub stake: u64,
     /// Epoch at which this delegation was activated
     pub activation_epoch: u64,
-    /// Epoch at which this delegation was deactivated, or std::u64::MAX if never deactivated
+    /// Epoch at which this delegation was deactivated, or u64::MAX if never deactivated
     pub deactivation_epoch: u64,
     /// How much stake we can activate per-epoch as a fraction of currently effective stake
     pub warmup_cooldown_rate: f64,
@@ -117,7 +119,7 @@ pub struct Delegation {
 
 impl Delegation {
     pub fn size() -> usize {
-        std::mem::size_of::<Delegation>()
+        size_of::<Delegation>()
     }
 
     /// Check if the delegation is active
@@ -148,7 +150,7 @@ impl Config {
 }
 
 /// Stake history entry
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Copy)]
 #[repr(C)]
 pub struct StakeHistoryEntry {
     /// Epoch for which this entry applies
@@ -163,16 +165,49 @@ pub struct StakeHistoryEntry {
 
 impl StakeHistoryEntry {
     pub const fn size() -> usize {
-       core::mem::size_of::<StakeHistoryEntry>()
+        core::mem::size_of::<StakeHistoryEntry>()
     }
 }
 
-/// Complete stake history
+/// Complete stake history with fixed-size array
 #[derive(Debug, Clone, PartialEq)]
 #[repr(C)]
 pub struct StakeHistory {
-    /// Vector of stake history entries
-    pub entries: Vec<StakeHistoryEntry>,
+    /// Fixed-size array of stake history entries
+    pub entries: [StakeHistoryEntry; MAX_STAKE_HISTORY_ENTRIES],
+    /// Number of valid entries in the array
+    pub len: usize,
+}
+
+impl StakeHistory {
+    pub fn new() -> Self {
+        Self {
+            entries: [StakeHistoryEntry {
+                epoch: 0,
+                effective: 0,
+                activating: 0,
+                deactivating: 0,
+            }; MAX_STAKE_HISTORY_ENTRIES],
+            len: 0,
+        }
+    }
+
+    pub fn push(&mut self, entry: StakeHistoryEntry) -> Result<(), &'static str> {
+        if self.len >= MAX_STAKE_HISTORY_ENTRIES {
+            return Err("StakeHistory is full");
+        }
+        self.entries[self.len] = entry;
+        self.len += 1;
+        Ok(())
+    }
+
+    pub fn get(&self, index: usize) -> Option<&StakeHistoryEntry> {
+        if index < self.len {
+            Some(&self.entries[index])
+        } else {
+            None
+        }
+    }
 }
 
 /// Initialize stake account instruction data
@@ -189,7 +224,7 @@ impl InitializeData {
     }
 }
 
-// Delegate stake instruction data  
+// Delegate stake instruction data
 #[derive(Debug, Clone, PartialEq)]
 #[repr(C)]
 pub struct DelegateStakeData {
@@ -214,7 +249,6 @@ impl SplitData {
         core::mem::size_of::<SplitData>()
     }
 }
-
 
 // Withdraw instruction data
 #[derive(Debug, Clone, PartialEq)]
@@ -251,21 +285,52 @@ pub enum StakeAuthorize {
     Withdrawer = 1,
 }
 
-/// Authorize with seed instruction data
-#[derive(Debug, Clone, PartialEq)]
-#[repr(C)]
-pub struct AuthorizeWithSeedData {
-    pub new_authorized: Pubkey,
-    pub stake_authorize: StakeAuthorize,
-    pub authority_seed: String,
-    pub authority_owner: Pubkey,
-}
+/// Authorize with seed instruction data using fixed-size byte array for seed
+// #[derive(Debug, Clone, PartialEq)]
+// #[repr(C)]
+// pub struct AuthorizeWithSeedData {
+//     pub new_authorized: Pubkey,
+//     pub stake_authorize: StakeAuthorize,
+//     /// Fixed-size byte array for authority seed
+//     pub authority_seed: [u8; MAX_AUTHORITY_SEED_LEN],
+//     /// Length of the actual seed data
+//     pub authority_seed_len: u8,
+//     pub authority_owner: Pubkey,
+// }
 
-impl AuthorizeWithSeedData {
-    pub const fn size() -> usize {
-        core::mem::size_of::<AuthorizeWithSeedData>()
-    }
-}
+// impl AuthorizeWithSeedData {
+//     pub const fn size() -> usize {
+//         core::mem::size_of::<AuthorizeWithSeedData>()
+//     }
+
+//     /// Create new instance with seed as byte slice
+//     pub fn new(
+//         new_authorized: Pubkey,
+//         stake_authorize: StakeAuthorize,
+//         authority_seed: &[u8],
+//         authority_owner: Pubkey,
+//     ) -> Result<Self, &'static str> {
+//         if authority_seed.len() > MAX_AUTHORITY_SEED_LEN {
+//             return Err("Authority seed too long");
+//         }
+
+//         let mut seed_array = [0u8; MAX_AUTHORITY_SEED_LEN];
+//         seed_array[..authority_seed.len()].copy_from_slice(authority_seed);
+
+//         Ok(Self {
+//             new_authorized,
+//             stake_authorize,
+//             authority_seed: seed_array,
+//             authority_seed_len: authority_seed.len() as u8,
+//             authority_owner,
+//         })
+//     }
+
+//     /// Get the authority seed as a slice
+//     pub fn get_authority_seed(&self) -> &[u8] {
+//         &self.authority_seed[..self.authority_seed_len as usize]
+//     }
+// }
 
 /// Set lockup instruction data
 #[derive(Debug, Clone, PartialEq)]
