@@ -1,34 +1,42 @@
 use pinocchio::{
-    account_info::AccountInfo,
-    pubkey::Pubkey,
+    account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, sysvars::clock::{self, Clock, Epoch, UnixTimestamp}
 };
 
 #[repr(u8)]
 pub enum StakeState {
-    /// Account is not yet initialized
-    Uninitialized = 0,
-
-    /// Account is initialized with stake metadata
-    Initialized = 1,
-
-    /// Account is a delegated stake account
-    Stake = 2,
-
-    /// Account represents rewards that were distributed to stake accounts
-    RewardsPool = 3
+  Uninitialized,
+  Initialized(Meta),
+  Stake(Meta, Stake),
+  RewardPool
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 #[repr(C)]
-pub struct Meta {
-    pub rent_exempt_reserve: u64,
-    pub authorized: Authorized,
-    pub lockup: Lockup,
+pub struct Meta{
+    pub rent_exempt_reserve: Pubkey,
+    pub authorized: Pubkey,
+    pub lockup: Pubkey,
 }
 
 impl Meta {
     pub fn size() -> usize {
         core::mem::size_of::<Meta>()
+    }
+
+    pub fn get_account_info(account: &AccountInfo) -> Result<&mut Self, ProgramError> {
+        if account.data_len() < core::mem::size_of::<Meta>() {
+            return Err(ProgramError::InvalidAccountData);
+        };
+
+        if !account.is_writable() {
+            return Err(ProgramError::InvalidAccountData);
+        }
+
+        if account.owner() != &crate::ID {
+            return Err(ProgramError::IncorrectProgramId);
+        };
+
+        return Ok( unsafe { &mut *(account.borrow_data_unchecked().as_ptr() as *mut Self) });
     }
 }
 
@@ -44,7 +52,7 @@ pub struct Authorized {
 
 impl Authorized {
     pub const fn size() -> usize {
-        8 + std::mem::size_of::<Authorized>()
+        8 + core::mem::size_of::<Authorized>()
     }
 
     pub fn new(staker: Pubkey, withdrawer: Pubkey) -> Self {
@@ -58,15 +66,18 @@ impl Authorized {
     pub fn is_withdrawer(&self, pubkey: &Pubkey) -> bool {
         self.withdrawer == *pubkey
     }
+
+    pub fn get_account_info(accounts: &AccountInfo) -> &mut Self {
+        unsafe { &mut *(accounts.borrow_mut_data_unchecked().as_ptr() as *mut Self) }
+    }
 }
 
-#[derive(Debug, Clone, PartialEq)]
 #[repr(C)]
 pub struct Lockup {
     /// Unix timestamp at which this stake will allow withdrawal, unless the transaction is signed by the custodian
-    pub unix_timestamp: i64,
+    pub unix_timestamp: UnixTimestamp,
     /// Epoch height at which this stake will allow withdrawal, unless the transaction is signed by the custodian
-    pub epoch: u64,
+    pub epoch: Epoch,
     // Custodian signature on a transaction exempts the operation from lockup constraints
     pub custodian: Pubkey,
 }
@@ -88,6 +99,28 @@ impl Lockup {
     /// Check if the lockup is active for the given timestamp and epoch
     pub fn is_active(&self, current_timestamp: i64, current_epoch: u64) -> bool {
         current_timestamp < self.unix_timestamp || current_epoch < self.epoch
+    }
+
+    pub fn get_account_info(account: &AccountInfo) -> Result<&mut Self, ProgramError> {
+        let data = account.try_borrow_mut_data().unwrap();
+
+        if data.len() < Self::size() {
+            return Err(ProgramError::InvalidAccountData);
+        };
+
+        if !account.is_writable() {
+            return Err(ProgramError::InvalidAccountData);
+        };
+
+        if account.owner() != &crate::ID {
+            return Err(ProgramError::IncorrectProgramId);
+        };
+
+        return Ok(
+            unsafe { 
+                &mut *(account.borrow_mut_data_unchecked().as_ptr() as *mut Self) 
+            }
+        );
     }
 }
 
@@ -117,7 +150,7 @@ pub struct Delegation {
 
 impl Delegation {
     pub fn size() -> usize {
-        std::mem::size_of::<Delegation>()
+        core::mem::size_of::<Delegation>()
     }
 
     /// Check if the delegation is active
@@ -172,11 +205,10 @@ impl StakeHistoryEntry {
 #[repr(C)]
 pub struct StakeHistory {
     /// Vector of stake history entries
-    pub entries: Vec<StakeHistoryEntry>,
+    pub entries: [StakeHistoryEntry; 10],
 }
 
 /// Initialize stake account instruction data
-#[derive(Debug, Clone, PartialEq)]
 #[repr(C)]
 pub struct InitializeData {
     pub authorized: Authorized,
@@ -252,32 +284,29 @@ pub enum StakeAuthorize {
 }
 
 /// Authorize with seed instruction data
-#[derive(Debug, Clone, PartialEq)]
 #[repr(C)]
-pub struct AuthorizeWithSeedData {
+pub struct AuthorizeWithSeedData<'a>{
     pub new_authorized: Pubkey,
     pub stake_authorize: StakeAuthorize,
-    pub authority_seed: String,
+    pub authority_seed: &'a [u8],
     pub authority_owner: Pubkey,
 }
 
-impl AuthorizeWithSeedData {
+impl<'a> AuthorizeWithSeedData<'a> {
     pub const fn size() -> usize {
         core::mem::size_of::<AuthorizeWithSeedData>()
     }
 }
 
-/// Set lockup instruction data
-#[derive(Debug, Clone, PartialEq)]
-#[repr(C)]
-pub struct LockupData {
+#[derive(Clone)]
+pub struct SetLockupData {
     pub unix_timestamp: Option<i64>,
     pub epoch: Option<u64>,
-    pub custodian: Option<Pubkey>,
+    pub custodian: Option<Pubkey>, 
 }
 
-impl LockupData {
-    pub const fn size() -> usize {
-        core::mem::size_of::<LockupData>()
+impl SetLockupData {
+    pub fn instruction_data(data: &[u8]) -> &mut Self {
+        unsafe { &mut *(data.as_ptr() as *mut Self) }
     }
 }

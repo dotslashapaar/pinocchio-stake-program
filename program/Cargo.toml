@@ -15,23 +15,22 @@ shank = "0.4.2"
 pinocchio-token = "0.4.0"
 
 
-
 [dev-dependencies]
 solana-sdk = "2.2.1"
 mollusk-svm = "0.4.0"
 mollusk-svm-bencher = "0.4.0"
 
 
-[features]
-no-entrypoint = []
-std = []
-test-default = ["no-entrypoint", "std"]
-bench-default = ["no-entrypoint", "std"]
+# [features]
+# no-entrypoint = []
+# std = []
+# test-default = ["no-entrypoint", "std"]
+# bench-default = ["no-entrypoint", "std"]
 
-[[bench]]
-name = "compute_units"
-harness = false
+# [[bench]]
+# name = "compute_units"
+# harness = false
 
 
-[[test]]
-name = "unit_tests"
+# [[test]]
+# name = "unit_tests"
