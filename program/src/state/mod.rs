@@ -1,2 +1,2 @@
 pub mod accounts;
-pub use accounts;
+pub use accounts::*;
