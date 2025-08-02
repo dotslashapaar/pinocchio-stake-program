@@ -44,7 +44,7 @@ pub struct Authorized {
 
 impl Authorized {
     pub const fn size() -> usize {
-        8 + std::mem::size_of::<Authorized>()
+        8 + core::mem::size_of::<Authorized>()
     }
 
     pub fn new(staker: Pubkey, withdrawer: Pubkey) -> Self {
@@ -117,7 +117,7 @@ pub struct Delegation {
 
 impl Delegation {
     pub fn size() -> usize {
-        std::mem::size_of::<Delegation>()
+        core::mem::size_of::<Delegation>()
     }
 
     /// Check if the delegation is active
