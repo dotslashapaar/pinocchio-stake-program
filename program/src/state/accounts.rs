@@ -1,5 +1,5 @@
 use pinocchio::{
-    account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, sysvars::clock::{self, Clock, Epoch, UnixTimestamp}
+    account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, sysvars::clock::{Epoch, UnixTimestamp}
 };
 
 #[repr(u8)]
@@ -12,10 +12,10 @@ pub enum StakeState {
 
 #[derive(Clone, PartialEq)]
 #[repr(C)]
-pub struct Meta {
-    pub rent_exempt_reserve: AccountInfo,
-    pub authorized: AccountInfo,
-    pub lockup: AccountInfo,
+pub struct Meta{
+    pub rent_exempt_reserve: Pubkey, 
+    pub authorized: Pubkey,          
+    pub lockup: Pubkey,              
 }
 
 impl Meta {
@@ -36,9 +36,8 @@ impl Meta {
             return Err(ProgramError::IncorrectProgramId);
         };
 
-        return Ok( unsafe { &*(account.borrow_data_unchecked().as_ptr() as *mut Self) });
+        return Ok( unsafe { &*(account.borrow_data_unchecked().as_ptr() as *const Self) });
     }
-
 
     pub fn get_account_info_mut(account: &AccountInfo) -> Result<&mut Self, ProgramError> {
         if account.data_len() < core::mem::size_of::<Meta>() {
@@ -69,7 +68,7 @@ pub struct Authorized {
 
 impl Authorized {
     pub const fn size() -> usize {
-        8 + core::mem::size_of::<Authorized>()
+        core::mem::size_of::<Authorized>()  // Removed the +8
     }
 
     pub fn new(staker: Pubkey, withdrawer: Pubkey) -> Self {
@@ -85,16 +84,14 @@ impl Authorized {
     }
 
     pub fn get_account_info(accounts: &AccountInfo) -> Result<&Self, ProgramError>  {
-
         if accounts.data_len() < Self::size() {
             return Err(ProgramError::InvalidAccountData);
         }
 
-        Ok (unsafe { &*(accounts.borrow_mut_data_unchecked().as_ptr() as *mut Self) })
+        Ok (unsafe { &*(accounts.borrow_data_unchecked().as_ptr() as *const Self) })
     }
 
     pub fn get_account_info_mut(accounts: &AccountInfo) -> Result<&mut Self, ProgramError>  {
-
         if accounts.data_len() < Self::size() {
             return Err(ProgramError::InvalidAccountData);
         }
@@ -133,9 +130,7 @@ impl Lockup {
     }
 
     pub fn get_account_info(account: &AccountInfo) -> Result<&Self, ProgramError> {
-        let data = account.try_borrow_mut_data().unwrap();
-
-        if data.len() < Self::size() {
+        if account.data_len() < Self::size() {
             return Err(ProgramError::InvalidAccountData);
         };
 
@@ -145,15 +140,13 @@ impl Lockup {
 
         return Ok(
             unsafe { 
-                &*(account.borrow_mut_data_unchecked().as_ptr() as *mut Self) 
+                &*(account.borrow_data_unchecked().as_ptr() as *const Self) 
             }
         );
     }
 
     pub fn get_account_info_mut(account: &AccountInfo) -> Result<&mut Self, ProgramError> {
-        let data = account.try_borrow_mut_data().unwrap();
-
-        if data.len() < Self::size() {
+        if account.data_len() < Self::size() {
             return Err(ProgramError::InvalidAccountData);
         };
 
@@ -296,7 +289,6 @@ impl SplitData {
     }
 }
 
-
 // Withdraw instruction data
 #[derive(Debug, Clone, PartialEq)]
 #[repr(C)]
@@ -355,6 +347,8 @@ pub struct SetLockupData {
 }
 
 impl SetLockupData {
+    pub const LEN: usize = 1 + 8 + 1 + 8 + 1 + 32; // flags + timestamp + flag + epoch + flag + pubkey
+    
     pub fn instruction_data(data: &[u8]) -> &mut Self {
         unsafe { &mut *(data.as_ptr() as *mut Self) }
     }
@@ -363,7 +357,7 @@ impl SetLockupData {
 #[derive(Clone, PartialEq)]
 #[repr(C)]
 pub struct StakeFlags {
-    bits: u8,
+    pub bits: u8,  // Made public
 }
 
 impl StakeFlags {
@@ -372,7 +366,7 @@ impl StakeFlags {
         bits: 0b0000_0001
     };
 
-    pub const fn enmpty() -> Self {
+    pub const fn empty() -> Self {  // Fixed typo: "enmpty" -> "empty"
         Self { bits: 0 }
     }
 
@@ -417,36 +411,31 @@ impl StakeStateV2 {
         match discriminant {
             0 => Ok(StakeStateV2::Uninitialized),
             1 => {
-                
                 let meta = Self::deserialize_meta(&data[1..])?;
                 Ok(StakeStateV2::Initialized(meta))
             }
             2 => {
-                
                 let meta = Self::deserialize_meta(&data[1..])?;
-                let stake = Self::deserialize_stake(&data[1 + size_of::<Meta>()..])?;
+                let stake = Self::deserialize_stake(&data[1 + core::mem::size_of::<Meta>()..])?;
                 
-                
-                let flags_offset = 1 + size_of::<Meta>() + size_of::<Stake>();
+                let flags_offset = 1 + core::mem::size_of::<Meta>() + core::mem::size_of::<Stake>();
                 let stake_flags = if data.len() > flags_offset && data[flags_offset] != 0 {
-                    Some(StakeFlags::new(data[flags_offset]))
+                    StakeFlags { bits: data[flags_offset] }
                 } else {
-                    None
+                    StakeFlags::empty()
                 };
                 
                 Ok(StakeStateV2::Stake(meta, stake, stake_flags))
             }
-            3 => Ok(StakeStateV2::RewardsPool),
+            3 => Ok(StakeStateV2::RewardPool),
             _ => Err(ProgramError::InvalidAccountData),
         }
     }
     
-
     pub fn serialize(&self, data: &mut [u8]) -> Result<(), ProgramError> {
         if data.len() < Self::ACCOUNT_SIZE {
             return Err(ProgramError::AccountDataTooSmall);
         }
-        
         
         data.iter_mut().for_each(|byte| *byte = 0);
         
@@ -461,14 +450,12 @@ impl StakeStateV2 {
             StakeStateV2::Stake(meta, stake, stake_flags) => {
                 data[0] = 2;
                 Self::serialize_meta(meta, &mut data[1..])?;
-                Self::serialize_stake(stake, &mut data[1 + size_of::<Meta>()..])?;
-                
-                if let Some(flags) = stake_flags {
-                    let flags_offset = 1 + size_of::<Meta>() + size_of::<Stake>();
-                    data[flags_offset] = flags.bits;
-                }
+                Self::serialize_stake(stake, &mut data[1 + core::mem::size_of::<Meta>()..])?;
+
+                let flags_offset = 1 + core::mem::size_of::<Meta>() + core::mem::size_of::<Stake>();
+                data[flags_offset] = stake_flags.bits;
             }
-            StakeStateV2::RewardsPool => {
+            StakeStateV2::RewardPool => {
                 data[0] = 3;
             }
         }
@@ -477,7 +464,7 @@ impl StakeStateV2 {
     }
     
     fn deserialize_meta(data: &[u8]) -> Result<Meta, ProgramError> {
-        if data.len() < size_of::<Meta>() {
+        if data.len() < core::mem::size_of::<Meta>() {
             return Err(ProgramError::InvalidAccountData);
         }
         let meta = unsafe { core::ptr::read_unaligned(data.as_ptr() as *const Meta) };
@@ -486,7 +473,7 @@ impl StakeStateV2 {
     }
     
     fn serialize_meta(meta: &Meta, data: &mut [u8]) -> Result<(), ProgramError> {
-        if data.len() < size_of::<Meta>() {
+        if data.len() < core::mem::size_of::<Meta>() {
             return Err(ProgramError::AccountDataTooSmall);
         }
         unsafe { core::ptr::write_unaligned(data.as_mut_ptr() as *mut Meta, meta.clone()) };
@@ -495,7 +482,7 @@ impl StakeStateV2 {
     }
     
     fn deserialize_stake(data: &[u8]) -> Result<Stake, ProgramError> {
-        if data.len() < size_of::<Stake>() {
+        if data.len() < core::mem::size_of::<Stake>() {
             return Err(ProgramError::InvalidAccountData);
         }
         let stake = unsafe {core::ptr::read_unaligned(data.as_ptr() as *const Stake)};
@@ -504,7 +491,7 @@ impl StakeStateV2 {
     }
     
     fn serialize_stake(stake: &Stake, data: &mut [u8]) -> Result<(), ProgramError> {
-        if data.len() < size_of::<Stake>() {
+        if data.len() < core::mem::size_of::<Stake>() {
             return Err(ProgramError::AccountDataTooSmall);
         }
         unsafe {core::ptr::write_unaligned(data.as_mut_ptr() as *mut Stake, stake.clone());}
