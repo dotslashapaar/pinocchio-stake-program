@@ -3,7 +3,7 @@ use pinocchio::{
 };
 
 #[repr(u8)]
-pub enum StakeStateV2 {
+pub enum StakeState {
   Uninitialized,
   Initialized(Meta),
   Stake(Meta, Stake),
