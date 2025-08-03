@@ -253,7 +253,7 @@ impl StakeHistoryEntry {
 #[derive(Debug, Clone, PartialEq)]
 #[repr(C)]
 pub struct StakeHistory {
-    /// Vector of stake history entries
+    /// Array of stake history entries
     pub entries: [StakeHistoryEntry; 10],
 }
 
@@ -407,12 +407,10 @@ impl StakeStateV2 {
     
     pub const ACCOUNT_SIZE: usize = 200; 
     
-  //diff 6: serialization/deserialization missing zeeshan's version
     pub fn deserialize(data: &[u8]) -> Result<Self, ProgramError> {
         if data.is_empty() {
             return Err(ProgramError::InvalidAccountData);
         }
-        
         
         let discriminant = data[0];
         
