@@ -1,16 +1,17 @@
 use pinocchio::{
-    account_info::AccountInfo, program_error::ProgramError, pubkey::{self, Pubkey}, sysvars::{clock::Clock, rent::Rent, Sysvar}, ProgramResult, 
+    account_info::AccountInfo,
+    program_error::ProgramError,
+    pubkey::{self, Pubkey},
+    sysvars::{clock::Clock, rent::Rent, Sysvar},
+    ProgramResult,
 };
 
 use pinocchio_system::instructions::CreateAccount;
 
-use crate::state::accounts::{
-    Meta, 
-    SetLockupData, 
-    Authorized, 
-    Lockup
-};
+use crate::state::accounts::{Authorized, Lockup, SetLockupData};
+use crate::state::state::Meta;
 
+/// Processes the SetLockup instruction, which either creates a new lockup account
 pub fn process_set_lockup(accounts: &[AccountInfo], instruction_data: &[u8]) -> ProgramResult {
     let [stake_account, lockup_account, authority, _system_program, ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -28,10 +29,8 @@ pub fn process_set_lockup(accounts: &[AccountInfo], instruction_data: &[u8]) -> 
         return Err(ProgramError::MissingRequiredSignature);
     }
 
-    let (expected_lockup_pda, _bump) = pubkey::find_program_address(
-        &[b"lockup", stake_account.key().as_ref()],
-        &crate::ID,
-    );
+    let (expected_lockup_pda, _bump) =
+        pubkey::find_program_address(&[b"lockup", stake_account.key().as_ref()], &crate::ID);
 
     if lockup_account.key() != &expected_lockup_pda {
         return Err(ProgramError::InvalidSeeds);
@@ -42,9 +41,10 @@ pub fn process_set_lockup(accounts: &[AccountInfo], instruction_data: &[u8]) -> 
     let lockup_params = SetLockupData::instruction_data(instruction_data);
 
     // Validate at least one lockup parameter is provided
-    if lockup_params.unix_timestamp.is_none() 
-        && lockup_params.epoch.is_none() 
-        && lockup_params.custodian.is_none() {
+    if lockup_params.unix_timestamp.is_none()
+        && lockup_params.epoch.is_none()
+        && lockup_params.custodian.is_none()
+    {
         return Err(ProgramError::InvalidInstructionData);
     }
 
@@ -59,12 +59,7 @@ pub fn process_set_lockup(accounts: &[AccountInfo], instruction_data: &[u8]) -> 
 
     if needs_creation {
         // Case 1: Create new lockup account
-        create_lockup_account(
-            lockup_account,
-            authority, 
-            lockup_params,
-            lockup_size,
-        )?;
+        create_lockup_account(lockup_account, authority, lockup_params, lockup_size)?;
     } else {
         // Case 2: Update existing lockup account
         update_existing_lockup(
@@ -75,7 +70,7 @@ pub fn process_set_lockup(accounts: &[AccountInfo], instruction_data: &[u8]) -> 
             current_epoch,
         )?;
     }
-    stake_meta.lockup = *lockup_account.key();
+    // stake_meta.lockup = *lockup_account.key();
 
     Ok(())
 }
@@ -103,7 +98,7 @@ fn create_lockup_account(
     .invoke()?;
 
     let lockup_data = Lockup::get_account_info_mut(lockup_account)?;
-    
+
     lockup_data.unix_timestamp = lockup_params.unix_timestamp.unwrap_or(0);
     lockup_data.epoch = lockup_params.epoch.unwrap_or(0);
     lockup_data.custodian = lockup_params.custodian.unwrap_or(Pubkey::default());
@@ -123,10 +118,10 @@ fn update_existing_lockup(
 
     let lockup_is_active = existing_lockup.is_active(current_timestamp, current_epoch);
     let authority_is_custodian = authority.key() == &existing_lockup.custodian;
-    
+
     // Can modify if: lockup expired OR authority is the designated custodian
     let modification_allowed = !lockup_is_active || authority_is_custodian;
-    
+
     if !modification_allowed {
         validate_lockup_authority(authority)?;
         return Err(ProgramError::InvalidAccountData);
@@ -159,7 +154,7 @@ fn validate_lockup_authority(authority: &AccountInfo) -> ProgramResult {
 
     let authorized_data = Authorized::get_account_info(authority)?;
 
-    let is_authorized = authorized_data.is_staker(authority.key()) 
+    let is_authorized = authorized_data.is_staker(authority.key())
         || authorized_data.is_withdrawer(authority.key());
 
     if !is_authorized {
@@ -169,20 +164,20 @@ fn validate_lockup_authority(authority: &AccountInfo) -> ProgramResult {
     Ok(())
 }
 
-// ============================ TESTING process_set_lockup ============================ 
+// ============================ TESTING process_set_lockup ============================
 
 // #[cfg(test)]
 // pub mod testing {
 //     use super::*;
 //     use mollusk_svm::{program, result::Check, Mollusk};
 //     use solana_sdk::{
-//         account::Account, 
-//         instruction::{AccountMeta, Instruction}, 
-//         native_token::LAMPORTS_PER_SOL, 
+//         account::Account,
+//         instruction::{AccountMeta, Instruction},
+//         native_token::LAMPORTS_PER_SOL,
 //         pubkey::Pubkey,
 //         pubkey
 //     };
-    
+
 //     const PROGRAM_ID: Pubkey = pubkey!("Stake11111111111111111111111111111111111111");
 //     const AUTHORITY: Pubkey = Pubkey::new_from_array([0x01; 32]);
 //     const STAKE_ACCOUNT: Pubkey = Pubkey::new_from_array([0x02; 32]);
@@ -201,10 +196,10 @@ fn validate_lockup_authority(authority: &AccountInfo) -> ProgramResult {
 //         // Construct instruction data
 //         let mut instruction_data = [0u8; 49];
 //         instruction_data[0] = 6; // Instruction discriminator
-        
+
 //         let timestamp: i64 = 1000000;
 //         let epoch: u64 = 100;
-        
+
 //         instruction_data[1..9].copy_from_slice(&timestamp.to_le_bytes());
 //         instruction_data[9..17].copy_from_slice(&epoch.to_le_bytes());
 //         instruction_data[17..49].copy_from_slice(AUTHORITY.as_ref());
@@ -226,9 +221,9 @@ fn validate_lockup_authority(authority: &AccountInfo) -> ProgramResult {
 //             executable: false,
 //             rent_epoch: 0,
 //         };
-        
+
 //         let lockup_account = Account::new(0, 0, &system_program_id);
-        
+
 //         let authority_account_data = [0u8; 64]; // Fixed size for Authorized struct
 //         let authority_account = Account {
 //             lamports: 1 * LAMPORTS_PER_SOL,
@@ -237,10 +232,10 @@ fn validate_lockup_authority(authority: &AccountInfo) -> ProgramResult {
 //             executable: false,
 //             rent_epoch: 0,
 //         };
-        
+
 //         let instruction = Instruction::new_with_bytes(
-//             PROGRAM_ID, 
-//             &instruction_data, 
+//             PROGRAM_ID,
+//             &instruction_data,
 //             ix_accounts.to_vec() // Convert to Vec only for function call
 //         );
 
@@ -259,7 +254,7 @@ fn validate_lockup_authority(authority: &AccountInfo) -> ProgramResult {
 //             &[Check::success()], // No checks first
 //         );
 //     }
-    
+
 //     // Minimal test to isolate compute unit issue
 //     #[test]
 //     fn test_process_set_lockup_minimal() {
@@ -268,17 +263,17 @@ fn validate_lockup_authority(authority: &AccountInfo) -> ProgramResult {
 //         // Minimal instruction - just discriminator
 //         let instruction_data = [6u8; 1];
 //         let dummy_pubkey = Pubkey::new_from_array([0x03; 32]);
-        
+
 //         let ix_accounts = [
 //             AccountMeta::new(STAKE_ACCOUNT, true),
 //             AccountMeta::new(dummy_pubkey, false),
 //             AccountMeta::new(AUTHORITY, true),
 //             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
 //         ];
-        
+
 //         let instruction = Instruction::new_with_bytes(
-//             PROGRAM_ID, 
-//             &instruction_data, 
+//             PROGRAM_ID,
+//             &instruction_data,
 //             ix_accounts.to_vec()
 //         );
 
@@ -302,14 +297,14 @@ fn validate_lockup_authority(authority: &AccountInfo) -> ProgramResult {
 //     fn test_early_return() {
 //         // First, modify your process_set_lockup function temporarily:
 //         // Add `return Ok(());` as the first line to see if basic invocation works
-        
+
 //         let mollusk = Mollusk::new(&PROGRAM_ID, "target/deploy/pinocchio_stake");
 //         let instruction_data = [6u8; 1];
-        
+
 //         let ix_accounts = [AccountMeta::new(STAKE_ACCOUNT, true)];
 //         let instruction = Instruction::new_with_bytes(
-//             PROGRAM_ID, 
-//             &instruction_data, 
+//             PROGRAM_ID,
+//             &instruction_data,
 //             ix_accounts.to_vec()
 //         );
 
