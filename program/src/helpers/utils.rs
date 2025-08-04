@@ -1,6 +1,7 @@
 use crate::helpers::constant::*;
+use crate::state::stake_state_v2::StakeStateV2;
+use crate::ID;
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
-
 pub enum ErrorCode {
     TOOMANYSIGNERS = 0x1,
 }
@@ -35,3 +36,9 @@ pub fn next_account_info<'a, I: Iterator<Item = &'a AccountInfo>>(
 ) -> Result<&'a AccountInfo, ProgramError> {
     iter.next().ok_or(ProgramError::NotEnoughAccountKeys)
 }
+
+// fn get_stake_state(stake_account_info: &AccountInfo) -> Result<StakeStateV2, ProgramError> {
+//     if *stake_account_info.owner() != ID {
+//         return Err(ProgramError::InvalidAccountOwner);
+//     }
+// }

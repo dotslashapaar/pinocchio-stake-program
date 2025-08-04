@@ -1,7 +1,10 @@
+use core::mem::size_of;
 use pinocchio::sysvars::clock::Epoch;
+
 // we do not provide Default because this requires the real current epoch
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct StakeHistorySysvar(pub Epoch);
+pub const MAX_STAKE_HISTORY_ENTRIES: usize = 512;
 
 #[repr(C)]
 #[derive(Debug, PartialEq, Eq, Default, Clone)]
@@ -36,4 +39,50 @@ macro_rules! declare_sysvar_id {
         pinocchio_pubkey::declare_id!($name);
         $crate::impl_sysvar_id!($type);
     };
+}
+
+impl StakeHistoryEntry {
+    pub const fn size() -> usize {
+        size_of::<StakeHistoryEntry>()
+    }
+}
+
+/// Complete stake history with fixed-size array
+#[derive(Debug, Clone, PartialEq)]
+#[repr(C)]
+pub struct StakeHistory {
+    /// Fixed-size array of stake history entries
+    pub entries: [StakeHistoryEntry; MAX_STAKE_HISTORY_ENTRIES],
+    /// Number of valid entries in the array
+    pub len: usize,
+}
+
+impl StakeHistory {
+    pub fn new() -> Self {
+        Self {
+            entries: core::array::from_fn(|_| StakeHistoryEntry {
+                effective: [0u8; 8],
+                activating: [0u8; 8],
+                deactivating: [0u8; 8],
+            }),
+            len: 0,
+        }
+    }
+
+    pub fn push(&mut self, entry: StakeHistoryEntry) -> Result<(), &'static str> {
+        if self.len >= MAX_STAKE_HISTORY_ENTRIES {
+            return Err("StakeHistory is full");
+        }
+        self.entries[self.len] = entry;
+        self.len += 1;
+        Ok(())
+    }
+
+    pub fn get(&self, index: usize) -> Option<&StakeHistoryEntry> {
+        if index < self.len {
+            Some(&self.entries[index])
+        } else {
+            None
+        }
+    }
 }
