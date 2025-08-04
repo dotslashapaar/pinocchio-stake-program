@@ -26,10 +26,4 @@ test-default = ["no-entrypoint"]
 default = []
 bench-default = ["no-entrypoint"]
 
-# [[bench]]
-# name = "compute_units"
-# harness = false
 
-
-# [[test]]
-# name = "unit_tests"

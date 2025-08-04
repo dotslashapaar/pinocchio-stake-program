@@ -1,0 +1,2 @@
+pub const MAXIMUM_SIGNERS: usize = 32;
+pub const DEFAULT_WARMUP_COOLDOWN_RATE: f64 = 0.25;
