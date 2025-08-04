@@ -22,5 +22,11 @@ fn initialize(accounts: &[AccountInfo], authorized: Authorized, lockup: Lockup) 
     // `get_stake_state()` is called unconditionally, which checks owner
     // do_initialize(stake_account_info, authorized, lockup, rent)?;
 
-    Ok(())
-}
+
+        let rent = &Rent::from_account_info(rent_info)?;
+
+        // `get_stake_state()` is called unconditionally, which checks owner
+        do_initialize(stake_account_info, authorized, lockup, rent)?;
+
+        Ok(())
+    }

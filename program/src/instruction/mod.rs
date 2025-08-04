@@ -1,10 +1,14 @@
 use pinocchio::program_error::ProgramError;
 
 pub mod initialize;
-pub mod split;
 
 pub use initialize::*;
 pub use split::*;
+
+
+pub mod set_lockup;
+pub use set_lockup::*;
+
 
 #[repr(u8)]
 pub enum StakeInstruction {
