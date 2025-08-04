@@ -1,3 +1,25 @@
+
+use core::mem::size_of;
+use pinocchio::pubkey::Pubkey;
+
+// Constants for fixed-size arrays
+pub const MAX_STAKE_HISTORY_ENTRIES: usize = 512;
+pub const MAX_AUTHORITY_SEED_LEN: usize = 32;
+
+#[repr(u8)]
+pub enum StakeState {
+    /// Account is not yet initialized
+    Uninitialized = 0,
+
+    /// Account is initialized with stake metadata
+    Initialized = 1,
+
+    /// Account is a delegated stake account
+    Stake = 2,
+
+    /// Account represents rewards that were distributed to stake accounts
+    RewardsPool = 3,
+
 use pinocchio::{
     account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, sysvars::clock::{self, Clock, Epoch, UnixTimestamp}
 };
@@ -8,6 +30,7 @@ pub enum StakeStateV2 {
   Initialized(Meta),
   Stake(Meta, Stake),
   RewardPool
+
 }
 
 #[derive(Clone, PartialEq)]
@@ -40,19 +63,21 @@ impl Meta {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
 #[repr(C)]
+#[derive(Default, Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Authorized {
     /// Authority to manage the stake account (delegate, deactivate, split, merge)
     pub staker: Pubkey,
 
     /// Authority to withdraw funds from the stake account
-    pub withdrawer: Pubkey
+    pub withdrawer: Pubkey,
 }
 
 impl Authorized {
     pub const fn size() -> usize {
-        8 + core::mem::size_of::<Authorized>()
+
+        8 + size_of::<Authorized>()
+
     }
 
     pub fn new(staker: Pubkey, withdrawer: Pubkey) -> Self {
@@ -92,7 +117,7 @@ impl Lockup {
         Self {
             unix_timestamp,
             epoch,
-            custodian
+            custodian,
         }
     }
 
@@ -142,7 +167,7 @@ pub struct Delegation {
     pub stake: u64,
     /// Epoch at which this delegation was activated
     pub activation_epoch: u64,
-    /// Epoch at which this delegation was deactivated, or std::u64::MAX if never deactivated
+    /// Epoch at which this delegation was deactivated, or u64::MAX if never deactivated
     pub deactivation_epoch: u64,
     /// How much stake we can activate per-epoch as a fraction of currently effective stake
     pub warmup_cooldown_rate: f64,
@@ -150,7 +175,9 @@ pub struct Delegation {
 
 impl Delegation {
     pub fn size() -> usize {
-        core::mem::size_of::<Delegation>()
+
+        size_of::<Delegation>()
+
     }
 
     /// Check if the delegation is active
@@ -181,7 +208,7 @@ impl Config {
 }
 
 /// Stake history entry
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Copy)]
 #[repr(C)]
 pub struct StakeHistoryEntry {
     /// Epoch for which this entry applies
@@ -196,16 +223,51 @@ pub struct StakeHistoryEntry {
 
 impl StakeHistoryEntry {
     pub const fn size() -> usize {
-       core::mem::size_of::<StakeHistoryEntry>()
+        core::mem::size_of::<StakeHistoryEntry>()
     }
 }
 
-/// Complete stake history
+/// Complete stake history with fixed-size array
 #[derive(Debug, Clone, PartialEq)]
 #[repr(C)]
 pub struct StakeHistory {
-    /// Vector of stake history entries
-    pub entries: [StakeHistoryEntry; 10],
+
+    /// Fixed-size array of stake history entries
+    pub entries: [StakeHistoryEntry; MAX_STAKE_HISTORY_ENTRIES],
+    /// Number of valid entries in the array
+    pub len: usize,
+}
+
+impl StakeHistory {
+    pub fn new() -> Self {
+        Self {
+            entries: [StakeHistoryEntry {
+                epoch: 0,
+                effective: 0,
+                activating: 0,
+                deactivating: 0,
+            }; MAX_STAKE_HISTORY_ENTRIES],
+            len: 0,
+        }
+    }
+
+    pub fn push(&mut self, entry: StakeHistoryEntry) -> Result<(), &'static str> {
+        if self.len >= MAX_STAKE_HISTORY_ENTRIES {
+            return Err("StakeHistory is full");
+        }
+        self.entries[self.len] = entry;
+        self.len += 1;
+        Ok(())
+    }
+
+    pub fn get(&self, index: usize) -> Option<&StakeHistoryEntry> {
+        if index < self.len {
+            Some(&self.entries[index])
+        } else {
+            None
+        }
+    }
+
 }
 
 /// Initialize stake account instruction data
@@ -221,7 +283,7 @@ impl InitializeData {
     }
 }
 
-// Delegate stake instruction data  
+// Delegate stake instruction data
 #[derive(Debug, Clone, PartialEq)]
 #[repr(C)]
 pub struct DelegateStakeData {
@@ -246,7 +308,6 @@ impl SplitData {
         core::mem::size_of::<SplitData>()
     }
 }
-
 
 // Withdraw instruction data
 #[derive(Debug, Clone, PartialEq)]
@@ -283,6 +344,7 @@ pub enum StakeAuthorize {
     Withdrawer = 1,
 }
 
+
 /// Authorize with seed instruction data
 #[repr(C)]
 pub struct AuthorizeWithSeedData<'a>{
@@ -297,6 +359,7 @@ impl<'a> AuthorizeWithSeedData<'a> {
         core::mem::size_of::<AuthorizeWithSeedData>()
     }
 }
+
 
 #[derive(Clone)]
 pub struct SetLockupData {
