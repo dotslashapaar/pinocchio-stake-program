@@ -6,8 +6,8 @@ pub use initialize::*;
 pub use split::*;
 
 
-pub mod set_lockup;
-pub use set_lockup::*;
+pub mod process_set_lockup;
+pub use process_set_lockup::*;
 
 
 #[repr(u8)]

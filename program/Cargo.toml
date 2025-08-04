@@ -1,5 +1,5 @@
 [package]
-name = "pinoccio-stake"
+name = "pinocchio-stake"
 version = "0.1.0"
 edition = "2021"
 
@@ -20,11 +20,10 @@ solana-sdk = "2.2.1"
 mollusk-svm = "0.4.0"
 mollusk-svm-bencher = "0.4.0"
 
-
-# [features]
-# no-entrypoint = []
-# std = []
-# test-default = ["no-entrypoint", "std"]
-# bench-default = ["no-entrypoint", "std"]
+[features]
+no-entrypoint = []
+test-default = ["no-entrypoint"]
+default = []
+bench-default = ["no-entrypoint"]
 
 
