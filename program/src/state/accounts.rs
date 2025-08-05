@@ -254,6 +254,50 @@ impl<'a> AuthorizeWithSeedData<'a> {
     pub const fn size() -> usize {
         core::mem::size_of::<AuthorizeWithSeedData>()
     }
+
+   pub fn parse(data: &'a [u8]) -> Result<Self, ProgramError> {
+        // Expected format:
+        // [0..32] - new_authorized pubkey
+        // [32] - stake_authorize (0 or 1) 
+        // [33] - seed length
+        // [34..34+seed_len] - authority_seed
+        // [34+seed_len..66+seed_len] - authority_owner pubkey
+        
+        if data.len() < 34 + 32 { 
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        // Fix: use [0..32] not [0..33]
+        let new_authorized = Pubkey::try_from(&data[0..32])
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
+
+        let stake_authorize = match data[32] {
+            0 => StakeAuthorize::Staker,
+            1 => StakeAuthorize::Withdrawer,
+            _ => return Err(ProgramError::InvalidInstructionData), 
+        };
+
+        let seed_len = data[33] as usize;
+
+        if seed_len > 32 {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        if data.len() < 34 + seed_len + 32 {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        let authority_seed = &data[34..34 + seed_len];
+        let authority_owner = Pubkey::try_from(&data[34 + seed_len..34 + seed_len + 32])
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
+
+        Ok(Self {
+            new_authorized,
+            stake_authorize,
+            authority_seed,
+            authority_owner,
+        })
+    }
 }
 
 #[derive(Clone)]
