@@ -11,7 +11,7 @@ use pinocchio_system::instructions::CreateAccount;
 use crate::state::accounts::{Authorized, Lockup, SetLockupData};
 use crate::state::state::Meta;
 
-/// Processes the SetLockup instruction, which either creates a new lockup account
+/// Processes the SetLockup instruction, which either creates a new lockup account or updates the existing lockup account
 pub fn process_set_lockup(accounts: &[AccountInfo], instruction_data: &[u8]) -> ProgramResult {
     let [stake_account, lockup_account, authority, _system_program, ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
