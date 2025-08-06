@@ -5,6 +5,7 @@ use pinocchio::{
     pubkey::Pubkey,
     sysvars::clock::{Epoch, UnixTimestamp},
 };
+use crate::error::StakeError;
 
 // Constants for fixed-size arrays
 pub const MAX_AUTHORITY_SEED_LEN: usize = 32;
@@ -50,6 +51,20 @@ impl Authorized {
         }
 
         Ok(unsafe { &mut *(accounts.borrow_mut_data_unchecked().as_ptr() as *mut Self) })
+    }
+
+    // verify required signature is present
+    pub fn check(&self, signers: &[Pubkey], stake_authorize: StakeAuthorize) -> Result<(), StakeError> {
+        let required = match stake_authorize {
+            StakeAuthorize::Staker => self.staker,
+            StakeAuthorize::Withdrawer => self.withdrawer,
+        };
+
+        if signers.contains(&required) {
+            Ok(())
+        } else {
+            Err(StakeError::InvalidAuthorization)
+        }
     }
 }
 
