@@ -1,6 +1,5 @@
 use pinocchio::pubkey::Pubkey;
 
-// fully defined VoteState (no Solana dependency)
 #[repr(C)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct VoteState {
