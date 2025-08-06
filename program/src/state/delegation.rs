@@ -1,4 +1,5 @@
 use crate::helpers::DEFAULT_WARMUP_COOLDOWN_RATE;
+use crate::helpers::utils::StakeHistorySysvar;
 
 use pinocchio::sysvars::clock::{Epoch, UnixTimestamp};
 use pinocchio::{account_info::AccountInfo, pubkey::Pubkey};
@@ -51,5 +52,24 @@ impl Default for Delegation {
             deactivation_epoch: u64::MAX,
             warmup_cooldown_rate: DEFAULT_WARMUP_COOLDOWN_RATE.to_le_bytes(),
         }
+    }
+}
+
+// helper: check if stake is active for current epoch
+impl Stake {
+    pub fn is_active(&self, current_epoch: u64, _stake_history: &StakeHistorySysvar) -> bool {
+        self.delegation.activation_epoch <= current_epoch
+            && current_epoch < self.delegation.deactivation_epoch
+    }
+
+    pub fn set_credits_observed(&mut self, credits: u64) {
+        self.credits_observed = credits.to_le_bytes();
+    }
+}
+
+// helper: set stake amount
+impl Delegation {
+    pub fn set_stake_amount(&mut self, amount: u64) {
+        self.stake = amount.to_le_bytes();
     }
 }
