@@ -22,5 +22,19 @@ fn process_split(accounts: &[AccountInfo], split_lamports: u64) -> ProgramResult
     if destination_data_len != StakeStateV2::size_of() {
         return Err(ProgramError::InvalidAccountData);
     }
+
+    if let StakeStateV2::Uninitialized =
+        StakeStateV2::get_stake_state(destination_stake_account_info)?
+    {
+    } else {
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    let source_lamport_balance = source_stake_account_info.lamports();
+    let destination_lamport_balance = destination_stake_account_info.lamports();
+
+    if split_lamports > source_lamport_balance {
+        return Err(ProgramError::InsufficientFunds);
+    }
     Ok(())
 }

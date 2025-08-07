@@ -1,6 +1,4 @@
 use crate::helpers::constant::*;
-use crate::state::stake_state_v2::StakeStateV2;
-use crate::ID;
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
 pub enum ErrorCode {
     TOOMANYSIGNERS = 0x1,
@@ -37,8 +35,32 @@ pub fn next_account_info<'a, I: Iterator<Item = &'a AccountInfo>>(
     iter.next().ok_or(ProgramError::NotEnoughAccountKeys)
 }
 
-// fn get_stake_state(stake_account_info: &AccountInfo) -> Result<StakeStateV2, ProgramError> {
-//     if *stake_account_info.owner() != ID {
-//         return Err(ProgramError::InvalidAccountOwner);
-//     }
-// }
+/// The minimum stake amount that can be delegated, in lamports.
+/// NOTE: This is also used to calculate the minimum balance of a delegated
+/// stake account, which is the rent exempt reserve _plus_ the minimum stake
+/// delegation.
+#[inline(always)]
+pub fn get_minimum_delegation() -> u64 {
+    if FEATURE_STAKE_RAISE_MINIMUM_DELEGATION_TO_1_SOL {
+        const MINIMUM_DELEGATION_SOL: u64 = 1;
+        MINIMUM_DELEGATION_SOL * LAMPORTS_PER_SOL
+    } else {
+        1
+    }
+}
+pub fn warmup_cooldown_rate(
+    current_epoch: [u8; 8],
+    new_rate_activation_epoch: Option<[u8; 8]>,
+) -> f64 {
+    if current_epoch < new_rate_activation_epoch.unwrap_or(u64::MAX.to_le_bytes()) {
+        DEFAULT_WARMUP_COOLDOWN_RATE
+    } else {
+        NEW_WARMUP_COOLDOWN_RATE
+    }
+}
+
+pub type Epoch = [u8; 8];
+
+pub fn bytes_to_u64(bytes: [u8; 8]) -> u64 {
+    u64::from_le_bytes(bytes)
+}

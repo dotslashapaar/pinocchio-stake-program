@@ -1,11 +1,10 @@
 use core::mem::size_of;
 use pinocchio::{
-    account_info::AccountInfo,
-    program_error::ProgramError,
-    pubkey::Pubkey,
-    sysvars::clock::{Epoch, UnixTimestamp},
+    account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey,
+    sysvars::clock::UnixTimestamp,
 };
 
+use crate::helpers::*;
 // Constants for fixed-size arrays
 pub const MAX_AUTHORITY_SEED_LEN: usize = 32;
 
@@ -69,7 +68,7 @@ impl Lockup {
     }
 
     /// Create a new lockup
-    pub fn new(unix_timestamp: i64, epoch: u64, custodian: Pubkey) -> Self {
+    pub fn new(unix_timestamp: i64, epoch: Epoch, custodian: Pubkey) -> Self {
         Self {
             unix_timestamp,
             epoch,
@@ -79,7 +78,7 @@ impl Lockup {
 
     /// Check if the lockup is active for the given timestamp and epoch
     pub fn is_active(&self, current_timestamp: i64, current_epoch: u64) -> bool {
-        current_timestamp < self.unix_timestamp || current_epoch < self.epoch
+        current_timestamp < self.unix_timestamp || current_epoch < bytes_to_u64(self.epoch)
     }
 
     pub fn get_account_info(account: &AccountInfo) -> Result<&Self, ProgramError> {

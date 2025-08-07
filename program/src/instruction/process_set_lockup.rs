@@ -6,6 +6,7 @@ use pinocchio::{
     ProgramResult,
 };
 
+use crate::helpers::bytes_to_u64;
 use pinocchio_system::instructions::CreateAccount;
 
 use crate::state::accounts::{Authorized, Lockup, SetLockupData};
@@ -100,7 +101,7 @@ fn create_lockup_account(
     let lockup_data = Lockup::get_account_info_mut(lockup_account)?;
 
     lockup_data.unix_timestamp = lockup_params.unix_timestamp.unwrap_or(0);
-    lockup_data.epoch = lockup_params.epoch.unwrap_or(0);
+    lockup_data.epoch = lockup_params.epoch.unwrap_or(0).to_le_bytes();
     lockup_data.custodian = lockup_params.custodian.unwrap_or(Pubkey::default());
 
     Ok(())
@@ -134,8 +135,9 @@ fn update_existing_lockup(
     }
 
     if let Some(new_epoch) = lockup_params.epoch {
-        if new_epoch >= existing_lockup.epoch {
-            existing_lockup.epoch = new_epoch;
+        let existing_epoch = bytes_to_u64(existing_lockup.epoch);
+        if new_epoch >= existing_epoch {
+            existing_lockup.epoch = new_epoch.to_le_bytes();
         }
     }
 
