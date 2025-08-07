@@ -1,10 +1,12 @@
 use core::mem::size_of;
 use pinocchio::{
+
     account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey,
     sysvars::clock::UnixTimestamp,
 };
 
 use crate::helpers::*;
+
 // Constants for fixed-size arrays
 pub const MAX_AUTHORITY_SEED_LEN: usize = 32;
 
@@ -253,6 +255,7 @@ impl<'a> AuthorizeWithSeedData<'a> {
     pub const fn size() -> usize {
         core::mem::size_of::<AuthorizeWithSeedData>()
     }
+
 }
 
 #[derive(Clone)]
@@ -261,6 +264,7 @@ pub struct SetLockupData {
     pub epoch: Option<u64>,
     pub custodian: Option<Pubkey>,
 }
+
 
 impl SetLockupData {
     pub const LEN: usize = 1 + 8 + 1 + 8 + 1 + 32; // flags + timestamp + flag + epoch + flag + pubkey

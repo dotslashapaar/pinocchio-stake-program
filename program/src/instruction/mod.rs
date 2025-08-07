@@ -9,6 +9,12 @@ pub use split::*;
 pub mod process_set_lockup;
 pub use process_set_lockup::*;
 
+
+
+pub mod process_authorized_with_seeds;
+pub use process_authorized_with_seeds::*;
+
+
 #[repr(u8)]
 pub enum StakeInstruction {
     Initialize,

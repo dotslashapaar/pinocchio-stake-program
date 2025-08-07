@@ -1,9 +1,11 @@
+
 use crate::helpers::*;
 use crate::state::stake_history::{StakeHistoryEntry, StakeHistoryGetEntry};
 
 use pinocchio::pubkey::Pubkey;
 
 pub type StakeActivationStatus = StakeHistoryEntry;
+
 
 #[repr(C)]
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -42,6 +44,7 @@ impl Delegation {
             ..Delegation::default()
         }
     }
+
     pub fn is_bootstrap(&self) -> bool {
         bytes_to_u64(self.activation_epoch) == u64::MAX
     }
@@ -150,6 +153,7 @@ impl Delegation {
             (bytes_to_u64(delegated_stake), 0)
         }
     }
+
 }
 
 impl Default for Delegation {
@@ -158,8 +162,10 @@ impl Default for Delegation {
         Self {
             voter_pubkey: Pubkey::default(),
             stake: 0u64.to_le_bytes(),
+
             activation_epoch: 0u64.to_le_bytes(),
             deactivation_epoch: u64::MAX.to_le_bytes(),
+
             warmup_cooldown_rate: DEFAULT_WARMUP_COOLDOWN_RATE.to_le_bytes(),
         }
     }

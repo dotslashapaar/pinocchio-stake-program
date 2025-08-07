@@ -1,8 +1,10 @@
 use crate::state::delegation::Stake;
 use crate::state::stake_flag::StakeFlags;
 use crate::state::state::Meta;
+
 use crate::ID;
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError};
+
 
 #[repr(u8)]
 pub enum StakeStateV2 {
@@ -13,7 +15,9 @@ pub enum StakeStateV2 {
 }
 
 impl StakeStateV2 {
+
     pub const ACCOUNT_SIZE: usize = core::mem::size_of::<Self>();
+
 
     /// The fixed number of bytes used to serialize each stake account
     pub const fn size_of() -> usize {
@@ -120,6 +124,7 @@ impl StakeStateV2 {
         }
 
         Ok(())
+
     }
     #[inline]
     pub fn try_from_account_info_mut_raw(
@@ -193,5 +198,6 @@ mod tests {
             0,
             "Memory is not properly aligned for StakeStateV2"
         );
+
     }
 }
