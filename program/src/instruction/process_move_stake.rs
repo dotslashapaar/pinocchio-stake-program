@@ -4,7 +4,7 @@ use pinocchio::{
     ProgramResult,
 };
 
-use crate::helpers::{merge_delegation_stake_and_credits_observed, move_stake_or_lamports_shared_checks, set_stake_state};
+use crate::helpers::{get_minimum_delegation, merge_delegation_stake_and_credits_observed, move_stake_or_lamports_shared_checks, set_stake_state};
 use crate::error::StakeError;
 use crate::state::{MergeKind, StakeFlags, StakeStateV2};
 
@@ -64,6 +64,8 @@ pub fn move_stake(
     let source_effective_stake = source_stake.delegation.stake;
 
     // Source cannot move more stake than it has, regardless of how many lamports it has
+    let source_effective_stake = u64::from_le_bytes(source_stake.delegation.stake);
+
     let source_final_stake = source_effective_stake
         .checked_sub(lamports)
         .ok_or(ProgramError::InvalidArgument)?;
