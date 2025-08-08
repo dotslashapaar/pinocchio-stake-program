@@ -3,6 +3,9 @@ use pinocchio::program_error::ProgramError;
 pub mod initialize;
 pub mod split;
 
+pub mod process_withdraw;
+pub use process_withdraw::*;
+
 pub use initialize::*;
 pub use split::*;
 
