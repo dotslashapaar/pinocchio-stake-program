@@ -15,6 +15,12 @@ pub use process_authorized_with_seeds::*;
 pub mod process_delegate;
 pub use process_delegate::*;
 
+pub mod process_move_stake;
+pub use process_move_stake::*;
+
+pub mod process_redelegate;
+pub use process_redelegate::*;
+
 #[repr(u8)]
 pub enum StakeInstruction {
     Initialize,

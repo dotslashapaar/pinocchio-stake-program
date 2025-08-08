@@ -128,3 +128,7 @@ pub fn redelegate_stake(
     stake.set_credits_observed(vote_state.credits());
     Ok(())
 }
+
+pub(crate) fn checked_add(a: u64, b: u64) -> Result<u64, ProgramError> {
+    a.checked_add(b).ok_or(ProgramError::InsufficientFunds)
+}
