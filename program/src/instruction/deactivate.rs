@@ -13,21 +13,25 @@ use crate::{
 };
 
 pub fn process_deactivate(accounts: &[AccountInfo]) -> ProgramResult {
+    // 2 accounts are required: stake account, clock info
     if accounts.len() < 2 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
 
+    // basically this Unpacks accounts
     let [stake_account, clock_info, _remaining @ ..] = accounts else {
         return Err(ProgramError::InvalidAccountData);
     };
 
-    // Optional lockup authority
+    // Checks for an optional 3rd account (lockup authority/custodian).
     let option_lockup_authority = if accounts.len() > 2 { Some(&accounts[2]) } else { None };
 
+    // Ensures the stake account can be modified
     if !stake_account.is_writable() {
         return Err(ProgramError::InvalidAccountData);
     }
 
+    // Ensures the stake account is owned by the correct program
     if stake_account.owner() != &id() {
         return Err(ProgramError::IncorrectProgramId);
     }
@@ -39,6 +43,7 @@ pub fn process_deactivate(accounts: &[AccountInfo]) -> ProgramResult {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
+    // Ensures the staker is a signer
     if !staker.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
     }
@@ -60,7 +65,7 @@ pub fn process_deactivate(accounts: &[AccountInfo]) -> ProgramResult {
         return Err(ProgramError::InvalidAuthority );
     }
 
-    // Check lockup constraints
+    // Checks if the stake is time-locked; requires a valid custodian if active 
     if lockup.is_active(clock.unix_timestamp, clock.epoch) {
         let custodian_authorized = option_lockup_authority
             .map_or(false, |c| c.key() == &lockup.custodian);
@@ -69,7 +74,7 @@ pub fn process_deactivate(accounts: &[AccountInfo]) -> ProgramResult {
         }
     }
 
-    // Check if stake is fully activated
+    // Check if stake is fully activated like is delegation started
     if !stake.delegation.is_fully_activated(clock.epoch) {
         return Err(ProgramError::InvalidStakeState );
     }
@@ -79,7 +84,8 @@ pub fn process_deactivate(accounts: &[AccountInfo]) -> ProgramResult {
         return Err(ProgramError::AlreadyDeactivated );
     }
 
-    // Set deactivation epoch
+    // Sets the deactivation epoch to the current epoch,
+    // marking the stake as deactivated.
     stake.delegation.deactivation_epoch = clock.epoch;
 
     Ok(())
