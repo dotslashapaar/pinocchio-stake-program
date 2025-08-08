@@ -1,18 +1,26 @@
-use pinocchio::{account_info::AccountInfo, program_error::ProgramError, sysvars::clock::Clock};
+use pinocchio::{
+    account_info::AccountInfo,
+    program_error::ProgramError,
+    sysvars::{clock::Clock, Sysvar},
+};
 
-use crate::{helpers::{checked_add, get_stake_state}, state::{delegation::Stake, MergeKind, StakeHistory}};
+use crate::{
+    helpers::{bytes_to_u64, checked_add, get_stake_state},
+    state::{delegation::Stake, MergeKind, StakeHistory},
+};
 
 pub fn stake_weighted_credits_observed(
     stake: &Stake,
     absorbed_lamports: u64,
     absorbed_credits_observed: u64,
 ) -> Option<u64> {
-    if stake.credits_observed == absorbed_credits_observed {
-        Some(stake.credits_observed)
+    if bytes_to_u64(stake.credits_observed) == absorbed_credits_observed {
+        Some(bytes_to_u64(stake.credits_observed))
     } else {
-        let total_stake = u128::from(stake.delegation.stake.checked_add(absorbed_lamports)?);
-        let stake_weighted_credits =
-            u128::from(stake.credits_observed).checked_mul(u128::from(stake.delegation.stake))?;
+        let total_stake =
+            u128::from(bytes_to_u64(stake.delegation.stake).checked_add(absorbed_lamports)?);
+        let stake_weighted_credits = u128::from(bytes_to_u64(stake.credits_observed))
+            .checked_mul(u128::from(bytes_to_u64(stake.delegation.stake)))?;
         let absorbed_weighted_credits =
             u128::from(absorbed_credits_observed).checked_mul(u128::from(absorbed_lamports))?;
         // Discard fractional credits as a merge side-effect friction by taking
@@ -30,11 +38,12 @@ pub fn merge_delegation_stake_and_credits_observed(
     lamports_to_merge: u64,
     source_credits_observed: u64,
 ) -> Result<(), ProgramError> {
-    stake.delegation.stake = checked_add(stake.delegation.stake, lamports_to_merge)?;
-
-   stake.credits_observed =
-       stake_weighted_credits_observed(stake, lamports_to_merge, source_credits_observed)
-           .ok_or(ProgramError::ArithmeticOverflow)?;
+    stake.delegation.stake =
+        checked_add(bytes_to_u64(stake.delegation.stake), lamports_to_merge)?.to_le_bytes();
+    stake.credits_observed =
+        stake_weighted_credits_observed(stake, lamports_to_merge, source_credits_observed)
+            .ok_or(ProgramError::ArithmeticOverflow)?
+            .to_le_bytes();
 
     Ok(())
 }
@@ -45,7 +54,6 @@ pub fn move_stake_or_lamports_shared_checks(
     destination_stake_account_info: &AccountInfo,
     stake_authority_info: &AccountInfo,
 ) -> Result<(MergeKind, MergeKind), ProgramError> {
-    
     // Authority must sign (simplified check)
     if !stake_authority_info.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);

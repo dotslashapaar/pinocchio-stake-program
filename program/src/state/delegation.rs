@@ -1,6 +1,6 @@
 use crate::error::*;
 use crate::helpers::*;
-use crate::state::stake_history::{StakeHistoryEntry, StakeHistoryGetEntry};
+use crate::state::stake_history::{StakeHistoryEntry, StakeHistoryGetEntry, StakeHistorySysvar};
 
 use pinocchio::pubkey::Pubkey;
 

@@ -6,9 +6,10 @@ use pinocchio::{
 use crate::error::to_program_error;
 use crate::helpers::utils::{
     get_stake_state, get_vote_state, new_stake, redelegate_stake, set_stake_state,
-    validate_delegated_amount, StakeHistorySysvar, ValidatedDelegatedInfo,
+    validate_delegated_amount, ValidatedDelegatedInfo,
 };
 use crate::helpers::*;
+use crate::state::stake_history::StakeHistorySysvar;
 use crate::state::{StakeAuthorize, StakeFlags, StakeStateV2};
 
 // entrypoint for Delegate instruction

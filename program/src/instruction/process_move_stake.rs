@@ -1,11 +1,7 @@
-use pinocchio::{
-    account_info::AccountInfo, 
-    program_error::ProgramError,
-    ProgramResult,
-};
+use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramResult};
 
-use crate::helpers::{merge_delegation_stake_and_credits_observed, move_stake_or_lamports_shared_checks, set_stake_state};
-use crate::error::StakeError;
+use crate::error::{to_program_error, StakeError};
+use crate::helpers::*;
 use crate::state::{MergeKind, StakeFlags, StakeStateV2};
 
 pub fn relocate_lamports(
@@ -28,10 +24,7 @@ pub fn relocate_lamports(
     Ok(())
 }
 
-pub fn move_stake(
-    accounts: &[AccountInfo],
-    lamports: u64,
-) -> ProgramResult {
+pub fn move_stake(accounts: &[AccountInfo], lamports: u64) -> ProgramResult {
     if accounts.len() < 3 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
@@ -64,7 +57,7 @@ pub fn move_stake(
     let source_effective_stake = source_stake.delegation.stake;
 
     // Source cannot move more stake than it has, regardless of how many lamports it has
-    let source_final_stake = source_effective_stake
+    let source_final_stake = bytes_to_u64(source_effective_stake)
         .checked_sub(lamports)
         .ok_or(ProgramError::InvalidArgument)?;
 
@@ -78,11 +71,11 @@ pub fn move_stake(
         MergeKind::FullyActive(destination_meta, mut destination_stake) => {
             // If active, destination must be delegated to the same vote account as source
             if source_stake.delegation.voter_pubkey != destination_stake.delegation.voter_pubkey {
-                return Err(StakeError::VoteAddressMismatch.into());
+                return Err(to_program_error(StakeError::VoteAddressMismatch.into()));
             }
 
             let destination_effective_stake = destination_stake.delegation.stake;
-            let destination_final_stake = destination_effective_stake
+            let destination_final_stake = bytes_to_u64(destination_effective_stake)
                 .checked_add(lamports)
                 .ok_or(ProgramError::ArithmeticOverflow)?;
 
@@ -95,14 +88,18 @@ pub fn move_stake(
             merge_delegation_stake_and_credits_observed(
                 &mut destination_stake,
                 lamports,
-                source_stake.credits_observed,
+                bytes_to_u64(source_stake.credits_observed),
             )?;
 
             // StakeFlags::empty() is valid here because the only existing stake flag,
             // MUST_FULLY_ACTIVATE_BEFORE_DEACTIVATION_IS_PERMITTED, does not apply to active stakes
             set_stake_state(
                 destination_stake_account_info,
-                &StakeStateV2::Stake(destination_meta.clone(), destination_stake, StakeFlags::empty()),
+                &StakeStateV2::Stake(
+                    destination_meta.clone(),
+                    destination_stake,
+                    StakeFlags::empty(),
+                ),
             )?;
 
             destination_meta
@@ -114,13 +111,17 @@ pub fn move_stake(
             }
 
             let mut destination_stake = source_stake.clone();
-            destination_stake.delegation.stake = lamports;
+            destination_stake.delegation.stake = lamports.to_le_bytes();
 
             // StakeFlags::empty() is valid here because the only existing stake flag,
             // MUST_FULLY_ACTIVATE_BEFORE_DEACTIVATION_IS_PERMITTED, is cleared when a stake is activated
             set_stake_state(
                 destination_stake_account_info,
-                &StakeStateV2::Stake(destination_meta.clone(), destination_stake, StakeFlags::empty()),
+                &StakeStateV2::Stake(
+                    destination_meta.clone(),
+                    destination_stake,
+                    StakeFlags::empty(),
+                ),
             )?;
 
             destination_meta
@@ -134,7 +135,7 @@ pub fn move_stake(
             &StakeStateV2::Initialized(source_meta.clone()),
         )?;
     } else {
-        source_stake.delegation.stake = source_final_stake;
+        source_stake.delegation.stake = source_final_stake.to_le_bytes();
 
         // StakeFlags::empty() is valid here because the only existing stake flag,
         // MUST_FULLY_ACTIVATE_BEFORE_DEACTIVATION_IS_PERMITTED, does not apply to active stakes
@@ -152,8 +153,9 @@ pub fn move_stake(
 
     // This should be impossible, but because we do all our math with delegations,
     // best to guard it
-    if source_stake_account_info.lamports() < source_meta.rent_exempt_reserve
-        || destination_stake_account_info.lamports() < destination_meta.rent_exempt_reserve
+    if source_stake_account_info.lamports() < bytes_to_u64(source_meta.rent_exempt_reserve)
+        || destination_stake_account_info.lamports()
+            < bytes_to_u64(destination_meta.rent_exempt_reserve)
     {
         return Err(ProgramError::InvalidArgument);
     }

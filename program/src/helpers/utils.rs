@@ -1,5 +1,5 @@
 use crate::helpers::constant::*;
-
+use crate::state::stake_history::StakeHistorySysvar;
 use pinocchio::{
     account_info::AccountInfo,
     program_error::ProgramError,
@@ -23,7 +23,7 @@ pub struct ValidatedDelegatedInfo {
 }
 
 // wrapper for epoch to pass around
-pub struct StakeHistorySysvar(pub u64);
+// pub struct StakeHistorySysvar(pub u64);
 
 pub enum ErrorCode {
     TOOMANYSIGNERS = 0x1,
@@ -254,7 +254,6 @@ pub fn redelegate_stake(
     Ok(())
 }
 
-
 // dont call this "move" because we have an instruction MoveLamports
 pub fn relocate_lamports(
     source_account_info: &AccountInfo,
@@ -312,4 +311,3 @@ pub fn get_sysvar(
 pub(crate) fn checked_add(a: u64, b: u64) -> Result<u64, ProgramError> {
     a.checked_add(b).ok_or(ProgramError::InsufficientFunds)
 }
-

@@ -1,6 +1,10 @@
 use pinocchio::{program_error::ProgramError, sysvars::clock::Clock};
 
-use crate::{error::StakeError, state::{delegation::Stake, Meta, StakeFlags, StakeHistory, StakeStateV2}};
+use crate::{
+    error::{to_program_error, StakeError},
+    helpers::bytes_to_u64,
+    state::{delegation::Stake, Meta, StakeFlags, StakeHistory, StakeStateV2},
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum MergeKind {
@@ -29,42 +33,42 @@ impl MergeKind {
         match stake_state {
             StakeStateV2::Stake(meta, stake, stake_flags) => {
                 // Simplified logic, later => this would check epochs
-                if stake.delegation.deactivation_epoch == u64::MAX {
+                if bytes_to_u64(stake.delegation.deactivation_epoch) == u64::MAX {
                     Ok(MergeKind::FullyActive(meta.clone(), stake.clone()))
                 } else {
-                    Ok(MergeKind::ActivationEpoch(meta.clone(), stake.clone(), stake_flags.clone()))
+                    Ok(MergeKind::ActivationEpoch(
+                        meta.clone(),
+                        stake.clone(),
+                        stake_flags.clone(),
+                    ))
                 }
             }
-            StakeStateV2::Initialized(meta) => {
-                Ok(MergeKind::Inactive(meta.clone(), lamports, StakeFlags::empty()))
-            }
+            StakeStateV2::Initialized(meta) => Ok(MergeKind::Inactive(
+                meta.clone(),
+                lamports,
+                StakeFlags::empty(),
+            )),
             _ => Err(ProgramError::InvalidAccountData),
         }
     }
 
     /// Verify metas can be merged (authorities and lockups match)
-    pub fn metas_can_merge(
-        stake: &Meta,
-        source: &Meta,
-        clock: &Clock,
-    ) -> Result<(), ProgramError> {
+    pub fn metas_can_merge(stake: &Meta, source: &Meta, clock: &Clock) -> Result<(), ProgramError> {
         // Check authorities match
         if stake.authorized.staker != source.authorized.staker {
-            return Err(StakeError::MergeMismatch.into());
+            return Err(to_program_error(StakeError::MergeMismatch));
         }
 
         if stake.authorized.withdrawer != source.authorized.withdrawer {
-            return Err(StakeError::MergeMismatch.into());
+            return Err(to_program_error(StakeError::MergeMismatch));
         }
 
         // Check lockups if active
-        if stake.lockup.unix_timestamp > clock.unix_timestamp
-            || stake.lockup.epoch > clock.epoch
-        {
+        if stake.lockup.unix_timestamp > clock.unix_timestamp || stake.lockup.epoch > clock.epoch {
             if stake.lockup.unix_timestamp != source.lockup.unix_timestamp
                 || stake.lockup.epoch != source.lockup.epoch
             {
-                return Err(StakeError::LockupInForce.into());
+                return Err(to_program_error(StakeError::LockupInForce));
             }
         }
 
