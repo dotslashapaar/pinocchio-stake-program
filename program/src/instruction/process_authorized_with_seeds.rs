@@ -1,18 +1,16 @@
-use pinocchio::{
-    account_info::AccountInfo,
-    program_error::ProgramError,
-    ProgramResult,
-};
+use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramResult};
 
 use crate::state::accounts::{AuthorizeWithSeedData, Authorized, StakeAuthorize};
 
-pub fn process_authorized_with_seeds(accounts: &[AccountInfo], instruction_data: &[u8]) -> ProgramResult {
-
+pub fn process_authorized_with_seeds(
+    accounts: &[AccountInfo],
+    instruction_data: &[u8],
+) -> ProgramResult {
     if accounts.len() < 2 {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
-    let [stake_account, authority_account, _remaining @..] = accounts else {
+    let [stake_account, authority_account, _remaining @ ..] = accounts else {
         return Err(ProgramError::InvalidAccountData);
     };
 
@@ -33,7 +31,7 @@ pub fn process_authorized_with_seeds(accounts: &[AccountInfo], instruction_data:
     let mut authorized = Authorized::get_account_info_mut(stake_account)?;
 
     match authorized_data.stake_authorize {
-         StakeAuthorize::Staker => {
+        StakeAuthorize::Staker => {
             // Check if the authority account is the current staker
             if !authorized.is_staker(authority_account.key()) {
                 return Err(ProgramError::InvalidAccountData);

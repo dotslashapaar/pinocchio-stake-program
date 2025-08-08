@@ -1,11 +1,11 @@
 use core::mem::size_of;
 use pinocchio::{
-    account_info::AccountInfo,
-    program_error::ProgramError,
-    pubkey::Pubkey,
-    sysvars::clock::{Epoch, UnixTimestamp},
+    account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey,
+    sysvars::clock::UnixTimestamp,
 };
 use crate::error::StakeError;
+
+use crate::helpers::*;
 
 // Constants for fixed-size arrays
 pub const MAX_AUTHORITY_SEED_LEN: usize = 32;
@@ -84,7 +84,7 @@ impl Lockup {
     }
 
     /// Create a new lockup
-    pub fn new(unix_timestamp: i64, epoch: u64, custodian: Pubkey) -> Self {
+    pub fn new(unix_timestamp: i64, epoch: Epoch, custodian: Pubkey) -> Self {
         Self {
             unix_timestamp,
             epoch,
@@ -94,7 +94,7 @@ impl Lockup {
 
     /// Check if the lockup is active for the given timestamp and epoch
     pub fn is_active(&self, current_timestamp: i64, current_epoch: u64) -> bool {
-        current_timestamp < self.unix_timestamp || current_epoch < self.epoch
+        current_timestamp < self.unix_timestamp || current_epoch < bytes_to_u64(self.epoch)
     }
 
     pub fn get_account_info(account: &AccountInfo) -> Result<&Self, ProgramError> {
@@ -269,27 +269,26 @@ impl<'a> AuthorizeWithSeedData<'a> {
     pub const fn size() -> usize {
         core::mem::size_of::<AuthorizeWithSeedData>()
     }
-
-   pub fn parse(data: &'a [u8]) -> Result<Self, ProgramError> {
+    pub fn parse(data: &'a [u8]) -> Result<Self, ProgramError> {
         // Expected format:
         // [0..32] - new_authorized pubkey
-        // [32] - stake_authorize (0 or 1) 
+        // [32] - stake_authorize (0 or 1)
         // [33] - seed length
         // [34..34+seed_len] - authority_seed
         // [34+seed_len..66+seed_len] - authority_owner pubkey
-        
-        if data.len() < 34 + 32 { 
+
+        if data.len() < 34 + 32 {
             return Err(ProgramError::InvalidInstructionData);
         }
 
         // Fix: use [0..32] not [0..33]
-        let new_authorized = Pubkey::try_from(&data[0..32])
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
+        let new_authorized =
+            Pubkey::try_from(&data[0..32]).map_err(|_| ProgramError::InvalidInstructionData)?;
 
         let stake_authorize = match data[32] {
             0 => StakeAuthorize::Staker,
             1 => StakeAuthorize::Withdrawer,
-            _ => return Err(ProgramError::InvalidInstructionData), 
+            _ => return Err(ProgramError::InvalidInstructionData),
         };
 
         let seed_len = data[33] as usize;

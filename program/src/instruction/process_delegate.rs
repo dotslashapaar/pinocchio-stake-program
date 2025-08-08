@@ -1,21 +1,16 @@
 use pinocchio::{
-    account_info::AccountInfo,
-    program_error::ProgramError,
-    pubkey::Pubkey,
-    sysvars::clock::Clock,
+    account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, sysvars::clock::Clock,
     ProgramResult,
 };
 
-use crate::helpers::*;
-use crate::helpers::utils::{
-    ValidatedDelegatedInfo, StakeHistorySysvar, get_vote_state, get_stake_state, 
-    set_stake_state, validate_delegated_amount, new_stake, redelegate_stake
-};
 use crate::error::to_program_error;
-use crate::state::{
-    Authorized, Meta, StakeAuthorize, StakeFlags, StakeStateV2,
-    delegation::{Delegation, Stake},
+use crate::helpers::utils::{
+    get_stake_state, get_vote_state, new_stake, redelegate_stake, set_stake_state,
+    validate_delegated_amount, ValidatedDelegatedInfo,
 };
+use crate::helpers::*;
+use crate::state::stake_history::StakeHistorySysvar;
+use crate::state::{StakeAuthorize, StakeFlags, StakeStateV2};
 
 // entrypoint for Delegate instruction
 pub fn process_delegate(accounts: &[AccountInfo]) -> ProgramResult {

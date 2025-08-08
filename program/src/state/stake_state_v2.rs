@@ -1,7 +1,10 @@
 use crate::state::delegation::Stake;
 use crate::state::stake_flag::StakeFlags;
 use crate::state::state::Meta;
-use pinocchio::program_error::ProgramError;
+
+use crate::ID;
+use pinocchio::{account_info::AccountInfo, program_error::ProgramError};
+
 
 #[repr(u8)]
 pub enum StakeStateV2 {
@@ -12,7 +15,9 @@ pub enum StakeStateV2 {
 }
 
 impl StakeStateV2 {
-    pub const ACCOUNT_SIZE: usize = 200;
+
+    pub const ACCOUNT_SIZE: usize = core::mem::size_of::<Self>();
+
 
     /// The fixed number of bytes used to serialize each stake account
     pub const fn size_of() -> usize {
@@ -119,5 +124,80 @@ impl StakeStateV2 {
         }
 
         Ok(())
+
+    }
+    #[inline]
+    pub fn try_from_account_info_mut_raw(
+        account_info: &AccountInfo,
+    ) -> Result<&mut Self, ProgramError> {
+        let expected_size = Self::size_of();
+        let data = account_info.try_borrow_mut_data()?; //  returns RefMut<[u8]>
+
+        if data.len() != expected_size {
+            return Err(ProgramError::InvalidAccountData);
+        }
+
+        let ptr = data.as_ptr() as usize;
+        if ptr % core::mem::align_of::<Self>() != 0 {
+            return Err(ProgramError::InvalidAccountData); // misaligned
+        }
+
+        let ptr = data.as_ptr() as *mut Self;
+        // SAFETY:
+        // - `data` is mutable and of correct length
+        // - Alignment has been checked
+        // - Memory is assumed to contain a valid StakeStateV2
+        Ok(unsafe { &mut *ptr })
+    }
+
+    pub fn get_stake_state(
+        stake_account_info: &AccountInfo,
+    ) -> Result<&mut StakeStateV2, ProgramError> {
+        if *stake_account_info.owner() != ID {
+            return Err(ProgramError::InvalidAccountOwner);
+        }
+        Self::try_from_account_info_mut_raw(stake_account_info)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // use pinocchio::msg;
+    // use pinocchio_log::log;
+
+    use super::*;
+    #[test]
+    fn test_size_of() {
+        assert_eq!(
+            StakeStateV2::size_of(),
+            core::mem::size_of::<StakeStateV2>()
+        );
+    }
+
+    // test Check alignment
+    #[test]
+    fn test_alignment() {
+        use core::mem;
+
+        // Allocate a buffer with the correct size for StakeStateV2
+        const SIZE: usize = 208; //StakeStateV2::size_of();
+        let data = [0u8; SIZE];
+
+        // Get the raw pointer and check alignment
+        let ptr = data.as_ptr() as usize;
+        let alignment = mem::align_of::<StakeStateV2>();
+
+        // Log for debug info
+        // log!(" Alignment required: {}", alignment);
+        // log!(" Pointer address: {}", ptr);
+        // log!(" Pointer address % alignment: {}", ptr % alignment);
+
+        // Assert that the pointer is correctly aligned
+        assert_eq!(
+            ptr % alignment,
+            0,
+            "Memory is not properly aligned for StakeStateV2"
+        );
+
     }
 }

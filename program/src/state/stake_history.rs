@@ -1,3 +1,5 @@
+use crate::helpers::get_sysvar;
+use crate::ID;
 use core::mem::size_of;
 use pinocchio::sysvars::clock::Epoch;
 
@@ -45,6 +47,28 @@ impl StakeHistoryEntry {
     pub const fn size() -> usize {
         size_of::<StakeHistoryEntry>()
     }
+    pub fn with_effective(effective: u64) -> Self {
+        Self {
+            effective: effective.to_le_bytes(),
+            ..Self::default()
+        }
+    }
+
+    pub fn with_effective_and_activating(effective: u64, activating: u64) -> Self {
+        Self {
+            effective: effective.to_le_bytes(),
+            activating: activating.to_le_bytes(),
+            ..Self::default()
+        }
+    }
+
+    pub fn with_deactivating(deactivating: u64) -> Self {
+        Self {
+            effective: deactivating.to_le_bytes(),
+            deactivating: deactivating.to_le_bytes(),
+            ..Self::default()
+        }
+    }
 }
 
 /// Complete stake history with fixed-size array
@@ -83,6 +107,55 @@ impl StakeHistory {
             Some(&self.entries[index])
         } else {
             None
+        }
+    }
+}
+const EPOCH_AND_ENTRY_SERIALIZED_SIZE: u64 = 32;
+
+impl StakeHistoryGetEntry for StakeHistorySysvar {
+    fn get_entry(&self, target_epoch: Epoch) -> Option<StakeHistoryEntry> {
+        let current_epoch = self.0;
+
+        // if current epoch is zero this returns None because there is no history yet
+        let newest_historical_epoch = current_epoch.checked_sub(1)?;
+        let oldest_historical_epoch =
+            current_epoch.saturating_sub(MAX_STAKE_HISTORY_ENTRIES as u64);
+
+        // target epoch is old enough to have fallen off history; presume fully active/deactive
+        if target_epoch < oldest_historical_epoch {
+            return None;
+        }
+
+        // epoch delta is how many epoch-entries we offset in the stake history vector, which may be zero
+        // None means target epoch is current or in the future; this is a user error
+        let epoch_delta = newest_historical_epoch.checked_sub(target_epoch)?;
+
+        // offset is the number of bytes to our desired entry, including eight for vector length
+        let offset = epoch_delta
+            .checked_mul(EPOCH_AND_ENTRY_SERIALIZED_SIZE)?
+            .checked_add(core::mem::size_of::<u64>() as u64)?;
+
+        let mut entry_buf = [0; EPOCH_AND_ENTRY_SERIALIZED_SIZE as usize];
+        let result = get_sysvar(&mut entry_buf, &ID, offset, EPOCH_AND_ENTRY_SERIALIZED_SIZE);
+
+        match result {
+            Ok(()) => {
+                // All safe because `entry_buf` is a 32-length array
+                let entry_epoch = u64::from_le_bytes(entry_buf[0..8].try_into().unwrap());
+                let effective = u64::from_le_bytes(entry_buf[8..16].try_into().unwrap());
+                let activating = u64::from_le_bytes(entry_buf[16..24].try_into().unwrap());
+                let deactivating = u64::from_le_bytes(entry_buf[24..32].try_into().unwrap());
+
+                // this would only fail if stake history skipped an epoch or the binary format of the sysvar changed
+                assert_eq!(entry_epoch, target_epoch);
+
+                Some(StakeHistoryEntry {
+                    effective: effective.to_le_bytes(),
+                    activating: activating.to_le_bytes(),
+                    deactivating: deactivating.to_le_bytes(),
+                })
+            }
+            _ => None,
         }
     }
 }
