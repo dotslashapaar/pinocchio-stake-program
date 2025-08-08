@@ -1,4 +1,4 @@
-/*use crate::{helpers::*, state::stake_state_v2::StakeStateV2, state::StakeHistorySysvar};
+use crate::{helpers::*, state::stake_state_v2::StakeStateV2, state::StakeHistorySysvar};
 use pinocchio::{
     account_info::AccountInfo,
     program_error::ProgramError,
@@ -23,4 +23,4 @@ fn process_split(accounts: &[AccountInfo], split_lamports: u64) -> ProgramResult
         return Err(ProgramError::InvalidAccountData);
     }
     Ok(())
-}*/
+}
