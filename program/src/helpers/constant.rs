@@ -13,4 +13,4 @@ pub const NEW_WARMUP_COOLDOWN_RATE: f64 = 0.09;
 // epoch has been fully (de)activated. this means, as long as one epoch has
 // passed since activation where all prior stake had escaped warmup/cooldown,
 // we can pretend the rate has always beein 9% without issue. so we do that
-const PERPETUAL_NEW_WARMUP_COOLDOWN_RATE_EPOCH: Option<u64> = Some(0);
+pub const PERPETUAL_NEW_WARMUP_COOLDOWN_RATE_EPOCH: Option<[u8; 8]> = Some([0; 8]);

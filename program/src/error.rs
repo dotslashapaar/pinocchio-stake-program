@@ -7,6 +7,7 @@ pub enum StakeError {
     InsufficientFunds,
     InsufficientStake,
     AlreadyDeactivated,
+    InsufficientDelegation,
 }
 
 // map internal errors to standard program error
@@ -16,5 +17,6 @@ pub fn to_program_error(err: StakeError) -> ProgramError {
         StakeError::InsufficientFunds => ProgramError::InsufficientFunds,
         StakeError::InsufficientStake => ProgramError::Custom(0x10),
         StakeError::AlreadyDeactivated => ProgramError::Custom(0x11),
+        StakeError::InsufficientDelegation => ProgramError::Custom(0x12),
     }
 }

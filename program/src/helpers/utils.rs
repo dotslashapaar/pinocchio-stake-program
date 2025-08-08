@@ -5,6 +5,7 @@ use pinocchio::{
     program_error::ProgramError,
     pubkey::Pubkey,
     sysvars::{rent::Rent, Sysvar},
+    ProgramResult,
 };
 
 use crate::error::{to_program_error, StakeError};
@@ -251,4 +252,58 @@ pub fn redelegate_stake(
     stake.delegation.activation_epoch = clock_epoch.to_le_bytes();
     stake.set_credits_observed(vote_state.credits());
     Ok(())
+}
+
+// dont call this "move" because we have an instruction MoveLamports
+pub fn relocate_lamports(
+    source_account_info: &AccountInfo,
+    destination_account_info: &AccountInfo,
+    lamports: u64,
+) -> ProgramResult {
+    {
+        let mut source_lamports = source_account_info.try_borrow_mut_lamports()?;
+        *source_lamports = source_lamports
+            .checked_sub(lamports)
+            .ok_or(ProgramError::InsufficientFunds)?;
+    }
+
+    {
+        let mut destination_lamports = destination_account_info.try_borrow_mut_lamports()?;
+        *destination_lamports = destination_lamports
+            .checked_add(lamports)
+            .ok_or(ProgramError::ArithmeticOverflow)?;
+    }
+
+    Ok(())
+}
+
+const SUCCESS: u64 = 0;
+
+pub fn get_sysvar(
+    dst: &mut [u8],
+    sysvar_id: &Pubkey,
+    offset: u64,
+    length: u64,
+) -> Result<(), ProgramError> {
+    // Check that the provided destination buffer is large enough to hold the
+    // requested data.
+    if dst.len() < length as usize {
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    let sysvar_id = sysvar_id as *const _ as *const u8;
+    let var_addr = dst as *mut _ as *mut u8;
+
+    #[cfg(feature = "solana")]
+    let result =
+        unsafe { pinocchio::syscalls::sol_get_sysvar(sysvar_id, var_addr, offset, length) };
+
+    #[cfg(not(feature = "solana"))]
+    let result =
+        unsafe { pinocchio::syscalls::sol_get_sysvar(sysvar_id, var_addr, offset, length) };
+
+    match result {
+        SUCCESS => Ok(()),
+        e => Err(e.into()),
+    }
 }
