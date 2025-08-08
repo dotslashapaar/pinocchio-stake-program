@@ -1,7 +1,16 @@
+
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramResult};
 
 use crate::error::{to_program_error, StakeError};
 use crate::helpers::*;
+
+use pinocchio::{
+    account_info::AccountInfo, 
+    program_error::ProgramError,
+    ProgramResult,
+};
+
+
 use crate::state::{MergeKind, StakeFlags, StakeStateV2};
 
 pub fn relocate_lamports(
@@ -57,6 +66,7 @@ pub fn move_stake(accounts: &[AccountInfo], lamports: u64) -> ProgramResult {
     let source_effective_stake = source_stake.delegation.stake;
 
     // Source cannot move more stake than it has, regardless of how many lamports it has
+
     let source_final_stake = bytes_to_u64(source_effective_stake)
         .checked_sub(lamports)
         .ok_or(ProgramError::InvalidArgument)?;

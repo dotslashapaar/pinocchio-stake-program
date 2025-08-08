@@ -17,6 +17,10 @@ use crate::state::{
 };
 use crate::ID;
 
+const FEATURE_STAKE_RAISE_MINIMUM_DELEGATION_TO_1_SOL: bool = false;
+const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
+
+
 // helper for stake amount validation
 pub struct ValidatedDelegatedInfo {
     pub stake_amount: u64,
@@ -216,9 +220,12 @@ pub fn validate_delegated_amount(
     stake_account_info: &AccountInfo,
     meta: &Meta,
 ) -> Result<ValidatedDelegatedInfo, ProgramError> {
+    let rent_exempt_reserve = u64::from_le_bytes(meta.rent_exempt_reserve);
     let stake_amount = stake_account_info
         .lamports()
+
         .checked_sub(bytes_to_u64(meta.rent_exempt_reserve))
+
         .ok_or(StakeError::InsufficientFunds)
         .map_err(to_program_error)?;
 
@@ -311,3 +318,16 @@ pub fn get_sysvar(
 pub(crate) fn checked_add(a: u64, b: u64) -> Result<u64, ProgramError> {
     a.checked_add(b).ok_or(ProgramError::InsufficientFunds)
 }
+
+
+
+#[inline(always)]
+pub fn get_minimum_delegation() -> u64 {
+    if FEATURE_STAKE_RAISE_MINIMUM_DELEGATION_TO_1_SOL {
+        const MINIMUM_DELEGATION_SOL: u64 = 1;
+        MINIMUM_DELEGATION_SOL * LAMPORTS_PER_SOL
+    } else {
+        1
+    }
+}
+
