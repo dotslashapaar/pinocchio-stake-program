@@ -9,9 +9,8 @@ use pinocchio::{
 use crate::helpers::bytes_to_u64;
 use pinocchio_system::instructions::CreateAccount;
 
-use crate::state::accounts::{Authorized, Lockup, SetLockupData};
-use crate::state::state::Meta;
-
+use crate::state::accounts::{Authorized, SetLockupData};
+use crate::state::state::{Lockup, Meta};
 
 /// Processes the SetLockup instruction, which either creates a new lockup account or updates the existing lockup account
 
@@ -102,7 +101,7 @@ fn create_lockup_account(
 
     let lockup_data = Lockup::get_account_info_mut(lockup_account)?;
 
-    lockup_data.unix_timestamp = lockup_params.unix_timestamp.unwrap_or(0);
+    lockup_data.unix_timestamp = lockup_params.unix_timestamp.unwrap_or(0).to_le_bytes();
     lockup_data.epoch = lockup_params.epoch.unwrap_or(0).to_le_bytes();
     lockup_data.custodian = lockup_params.custodian.unwrap_or(Pubkey::default());
 
@@ -131,8 +130,8 @@ fn update_existing_lockup(
     }
 
     if let Some(new_timestamp) = lockup_params.unix_timestamp {
-        if new_timestamp >= existing_lockup.unix_timestamp {
-            existing_lockup.unix_timestamp = new_timestamp;
+        if new_timestamp >= i64::from_le_bytes(existing_lockup.unix_timestamp) {
+            existing_lockup.unix_timestamp = new_timestamp.to_le_bytes();
         }
     }
 

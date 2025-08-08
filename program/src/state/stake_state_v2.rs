@@ -5,8 +5,9 @@ use crate::state::state::Meta;
 use crate::ID;
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError};
 
+#[repr(C)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 
-#[repr(u8)]
 pub enum StakeStateV2 {
     Uninitialized,
     Initialized(Meta),
@@ -15,9 +16,7 @@ pub enum StakeStateV2 {
 }
 
 impl StakeStateV2 {
-
     pub const ACCOUNT_SIZE: usize = core::mem::size_of::<Self>();
-
 
     /// The fixed number of bytes used to serialize each stake account
     pub const fn size_of() -> usize {
@@ -124,7 +123,6 @@ impl StakeStateV2 {
         }
 
         Ok(())
-
     }
     #[inline]
     pub fn try_from_account_info_mut_raw(
@@ -163,11 +161,17 @@ impl StakeStateV2 {
 #[cfg(test)]
 mod tests {
     // use pinocchio::msg;
-    // use pinocchio_log::log;
+    use pinocchio_log::log;
 
     use super::*;
     #[test]
     fn test_size_of() {
+        // log all the data size of the StakeStateV2
+        log!("StakeStateV2 size: {}", StakeStateV2::size_of());
+        log!("StakeStateV2 account size: {}", StakeStateV2::ACCOUNT_SIZE);
+        log!("Meta size: {}", Meta::size());
+        log!("Stake size: {}", core::mem::size_of::<Stake>());
+        log!("StakeFlags size: {}", core::mem::size_of::<StakeFlags>());
         assert_eq!(
             StakeStateV2::size_of(),
             core::mem::size_of::<StakeStateV2>()
@@ -198,6 +202,5 @@ mod tests {
             0,
             "Memory is not properly aligned for StakeStateV2"
         );
-
     }
 }

@@ -6,7 +6,7 @@ use pinocchio::pubkey::Pubkey;
 
 pub type StakeActivationStatus = StakeHistoryEntry;
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Delegation {
     /// to whom the stake is delegated
