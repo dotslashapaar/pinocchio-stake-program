@@ -1,11 +1,9 @@
-
 use crate::helpers::*;
 use crate::state::stake_history::{StakeHistoryEntry, StakeHistoryGetEntry};
 
 use pinocchio::pubkey::Pubkey;
 
 pub type StakeActivationStatus = StakeHistoryEntry;
-
 
 #[repr(C)]
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -44,20 +42,94 @@ impl Delegation {
             ..Delegation::default()
         }
     }
-
     pub fn is_bootstrap(&self) -> bool {
         bytes_to_u64(self.activation_epoch) == u64::MAX
     }
-    // pub fn stake_activating_and_deactivating<T: StakeHistoryGetEntry>(
-    //     &self,
-    //     target_epoch: Epoch,
-    //     history: &T,
-    //     new_rate_activation_epoch: Option<Epoch>,
-    // ) -> StakeActivationStatus {
-    //     // first, calculate an effective and activating stake
-    //     let (effective_stake, activating_stake) =
-    //         self.stake_and_activating(target_epoch, history, new_rate_activation_epoch);
-    // }
+    pub fn stake_activating_and_deactivating<T: StakeHistoryGetEntry>(
+        &self,
+        target_epoch: Epoch,
+        history: &T,
+        new_rate_activation_epoch: Option<Epoch>,
+    ) -> StakeActivationStatus {
+        // first, calculate an effective and activating stake
+        let (effective_stake, activating_stake) =
+            self.stake_and_activating(target_epoch, history, new_rate_activation_epoch);
+
+        // then de-activate some portion if necessary
+        if target_epoch < self.deactivation_epoch {
+            // not deactivated
+            if activating_stake == 0 {
+                StakeActivationStatus::with_effective(effective_stake)
+            } else {
+                StakeActivationStatus::with_effective_and_activating(
+                    effective_stake,
+                    activating_stake,
+                )
+            }
+        } else if target_epoch == self.deactivation_epoch {
+            // can only deactivate what's activated
+            StakeActivationStatus::with_deactivating(effective_stake)
+        } else if let Some((history, mut prev_epoch, mut prev_cluster_stake)) = history
+            .get_entry(bytes_to_u64(self.deactivation_epoch))
+            .map(|cluster_stake_at_deactivation_epoch| {
+                (
+                    history,
+                    self.deactivation_epoch,
+                    cluster_stake_at_deactivation_epoch,
+                )
+            })
+        {
+            // target_epoch > self.deactivation_epoch
+
+            // loop from my deactivation epoch until the target epoch
+            // current effective stake is updated using its previous epoch's cluster stake
+            let mut current_epoch;
+            let mut current_effective_stake = effective_stake;
+            loop {
+                current_epoch = bytes_to_u64(prev_epoch) + 1;
+                // if there is no deactivating stake at prev epoch, we should have been
+                // fully undelegated at this moment
+                if bytes_to_u64(prev_cluster_stake.deactivating) == 0 {
+                    break;
+                }
+
+                // I'm trying to get to zero, how much of the deactivation in stake
+                //   this account is entitled to take
+                let weight = current_effective_stake as f64
+                    / bytes_to_u64(prev_cluster_stake.deactivating) as f64;
+                let warmup_cooldown_rate =
+                    warmup_cooldown_rate(current_epoch.to_le_bytes(), new_rate_activation_epoch);
+
+                // portion of newly not-effective cluster stake I'm entitled to at current epoch
+                let newly_not_effective_cluster_stake =
+                    bytes_to_u64(prev_cluster_stake.effective) as f64 * warmup_cooldown_rate;
+                let newly_not_effective_stake =
+                    ((weight * newly_not_effective_cluster_stake) as u64).max(1);
+
+                current_effective_stake =
+                    current_effective_stake.saturating_sub(newly_not_effective_stake);
+                if current_effective_stake == 0 {
+                    break;
+                }
+
+                if current_epoch >= bytes_to_u64(target_epoch) {
+                    break;
+                }
+                if let Some(current_cluster_stake) = history.get_entry(current_epoch) {
+                    prev_epoch = current_epoch.to_le_bytes();
+                    prev_cluster_stake = current_cluster_stake;
+                } else {
+                    break;
+                }
+            }
+
+            // deactivating stake should equal to all of currently remaining effective stake
+            StakeActivationStatus::with_deactivating(current_effective_stake)
+        } else {
+            // no history or I've dropped out of history, so assume fully deactivated
+            StakeActivationStatus::default()
+        }
+    }
 
     fn stake_and_activating<T: StakeHistoryGetEntry>(
         &self,
@@ -153,7 +225,6 @@ impl Delegation {
             (bytes_to_u64(delegated_stake), 0)
         }
     }
-
 }
 
 impl Default for Delegation {
@@ -162,10 +233,8 @@ impl Default for Delegation {
         Self {
             voter_pubkey: Pubkey::default(),
             stake: 0u64.to_le_bytes(),
-
             activation_epoch: 0u64.to_le_bytes(),
             deactivation_epoch: u64::MAX.to_le_bytes(),
-
             warmup_cooldown_rate: DEFAULT_WARMUP_COOLDOWN_RATE.to_le_bytes(),
         }
     }

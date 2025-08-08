@@ -45,6 +45,28 @@ impl StakeHistoryEntry {
     pub const fn size() -> usize {
         size_of::<StakeHistoryEntry>()
     }
+    pub fn with_effective(effective: u64) -> Self {
+        Self {
+            effective: effective.to_le_bytes(),
+            ..Self::default()
+        }
+    }
+
+    pub fn with_effective_and_activating(effective: u64, activating: u64) -> Self {
+        Self {
+            effective: effective.to_le_bytes(),
+            activating: activating.to_le_bytes(),
+            ..Self::default()
+        }
+    }
+
+    pub fn with_deactivating(deactivating: u64) -> Self {
+        Self {
+            effective: deactivating.to_le_bytes(),
+            deactivating: deactivating.to_le_bytes(),
+            ..Self::default()
+        }
+    }
 }
 
 /// Complete stake history with fixed-size array
