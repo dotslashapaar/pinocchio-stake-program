@@ -45,6 +45,18 @@ impl Delegation {
     pub fn is_bootstrap(&self) -> bool {
         bytes_to_u64(self.activation_epoch) == u64::MAX
     }
+
+    pub fn stake<T: StakeHistoryGetEntry>(
+        &self,
+        epoch: Epoch,
+        history: &T,
+        new_rate_activation_epoch: Option<Epoch>,
+    ) -> u64 {
+        let result = self
+            .stake_activating_and_deactivating(epoch, history, new_rate_activation_epoch)
+            .effective;
+        bytes_to_u64(result)
+    }
     pub fn stake_activating_and_deactivating<T: StakeHistoryGetEntry>(
         &self,
         target_epoch: Epoch,

@@ -36,5 +36,6 @@ fn process_split(accounts: &[AccountInfo], split_lamports: u64) -> ProgramResult
     if split_lamports > source_lamport_balance {
         return Err(ProgramError::InsufficientFunds);
     }
+
     Ok(())
 }
