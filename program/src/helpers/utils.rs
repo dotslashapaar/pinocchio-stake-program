@@ -254,6 +254,7 @@ pub fn redelegate_stake(
     Ok(())
 }
 
+
 // dont call this "move" because we have an instruction MoveLamports
 pub fn relocate_lamports(
     source_account_info: &AccountInfo,
@@ -307,3 +308,8 @@ pub fn get_sysvar(
         e => Err(e.into()),
     }
 }
+
+pub(crate) fn checked_add(a: u64, b: u64) -> Result<u64, ProgramError> {
+    a.checked_add(b).ok_or(ProgramError::InsufficientFunds)
+}
+
