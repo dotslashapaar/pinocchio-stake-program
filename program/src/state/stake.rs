@@ -1,6 +1,5 @@
 use crate::{
-    error::stake_error::*, helpers::*, state::delegation::Delegation,
-    state::stake_history::StakeHistoryGetEntry,
+    error::*, helpers::*, state::delegation::Delegation, state::stake_history::StakeHistoryGetEntry,
 };
 
 #[derive(Debug, Clone, PartialEq)]

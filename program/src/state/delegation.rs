@@ -1,11 +1,9 @@
-
 use crate::helpers::*;
 use crate::state::stake_history::{StakeHistoryEntry, StakeHistoryGetEntry};
 
 use pinocchio::pubkey::Pubkey;
 
 pub type StakeActivationStatus = StakeHistoryEntry;
-
 
 #[repr(C)]
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -257,8 +255,8 @@ impl Default for Delegation {
 // helper: check if stake is active for current epoch
 impl Stake {
     pub fn is_active(&self, current_epoch: u64, _stake_history: &StakeHistorySysvar) -> bool {
-        self.delegation.activation_epoch <= current_epoch
-            && current_epoch < self.delegation.deactivation_epoch
+        self.delegation.activation_epoch <= current_epoch.to_le_bytes()
+            && current_epoch < bytes_to_u64(self.delegation.deactivation_epoch)
     }
 
     pub fn set_credits_observed(&mut self, credits: u64) {

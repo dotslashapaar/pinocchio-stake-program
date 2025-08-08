@@ -1,6 +1,5 @@
 use crate::helpers::constant::*;
 
-
 use pinocchio::{
     account_info::AccountInfo,
     program_error::ProgramError,
@@ -8,13 +7,14 @@ use pinocchio::{
     sysvars::{rent::Rent, Sysvar},
 };
 
-
+use crate::error::{to_program_error, StakeError};
 use crate::state::stake_state_v2::StakeStateV2;
 use crate::state::vote_state::VoteState;
-use crate::state::{Meta, delegation::{Stake, Delegation}};
-use crate::error::{StakeError, to_program_error};
+use crate::state::{
+    delegation::{Delegation, Stake},
+    Meta,
+};
 use crate::ID;
-
 
 // helper for stake amount validation
 pub struct ValidatedDelegatedInfo {
@@ -58,7 +58,6 @@ pub fn next_account_info<'a, I: Iterator<Item = &'a AccountInfo>>(
 ) -> Result<&'a AccountInfo, ProgramError> {
     iter.next().ok_or(ProgramError::NotEnoughAccountKeys)
 }
-
 
 /// The minimum stake amount that can be delegated, in lamports.
 /// NOTE: This is also used to calculate the minimum balance of a delegated
@@ -171,6 +170,7 @@ pub(crate) fn validate_split_amount(
         source_remaining_balance,
         destination_rent_exempt_reserve,
     })
+}
 
 // fn get_stake_state(stake_account_info: &AccountInfo) -> Result<StakeStateV2, ProgramError> {
 //     if *stake_account_info.owner() != ID {
@@ -217,7 +217,7 @@ pub fn validate_delegated_amount(
 ) -> Result<ValidatedDelegatedInfo, ProgramError> {
     let stake_amount = stake_account_info
         .lamports()
-        .checked_sub(meta.rent_exempt_reserve)
+        .checked_sub(bytes_to_u64(meta.rent_exempt_reserve))
         .ok_or(StakeError::InsufficientFunds)
         .map_err(to_program_error)?;
 
@@ -232,7 +232,7 @@ pub fn new_stake(
     activation_epoch: u64,
 ) -> Stake {
     let mut stake = Stake::default();
-    stake.delegation = Delegation::new(vote_pubkey, stake_amount, activation_epoch);
+    stake.delegation = Delegation::new(vote_pubkey, stake_amount, activation_epoch.to_le_bytes());
     stake.set_credits_observed(vote_state.credits());
     stake
 }
@@ -248,8 +248,7 @@ pub fn redelegate_stake(
 ) -> Result<(), ProgramError> {
     stake.delegation.voter_pubkey = *vote_pubkey;
     stake.delegation.set_stake_amount(stake_amount);
-    stake.delegation.activation_epoch = clock_epoch;
+    stake.delegation.activation_epoch = clock_epoch.to_le_bytes();
     stake.set_credits_observed(vote_state.credits());
     Ok(())
-
 }
