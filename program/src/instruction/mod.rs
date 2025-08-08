@@ -26,6 +26,12 @@ pub use process_move_stake::*;
 pub mod process_redelegate;
 pub use process_redelegate::*;
 
+pub mod process_authorize_checked_with_seed;
+pub use process_authorize_checked_with_seed::*;
+
+pub mod deactivate;
+pub use deactivate::*;
+
 
 #[repr(u8)]
 pub enum StakeInstruction {
