@@ -3,6 +3,7 @@ use pinocchio::{
     account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey,
     sysvars::clock::UnixTimestamp,
 };
+use crate::error::StakeError;
 
 use crate::helpers::*;
 
@@ -50,6 +51,20 @@ impl Authorized {
         }
 
         Ok(unsafe { &mut *(accounts.borrow_mut_data_unchecked().as_ptr() as *mut Self) })
+    }
+
+    // verify required signature is present
+    pub fn check(&self, signers: &[Pubkey], stake_authorize: StakeAuthorize) -> Result<(), StakeError> {
+        let required = match stake_authorize {
+            StakeAuthorize::Staker => self.staker,
+            StakeAuthorize::Withdrawer => self.withdrawer,
+        };
+
+        if signers.contains(&required) {
+            Ok(())
+        } else {
+            Err(StakeError::InvalidAuthorization)
+        }
     }
 }
 
