@@ -12,6 +12,13 @@ pub use process_set_lockup::*;
 pub mod process_authorized_with_seeds;
 pub use process_authorized_with_seeds::*;
 
+pub mod deactivate_delinquent;
+pub use deactivate_delinquent::*;
+
+pub mod move_lamports;
+pub use move_lamports::*;
+
+
 #[repr(u8)]
 pub enum StakeInstruction {
     Initialize,
