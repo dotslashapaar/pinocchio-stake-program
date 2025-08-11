@@ -1,12 +1,11 @@
-use core::mem::size_of;
-use pinocchio::{
-    account_info::AccountInfo,
-    program_error::ProgramError,
-    pubkey::Pubkey,
-    sysvars::clock::{Epoch, UnixTimestamp},
-};
 
-// Constants for fixed-size arrays
+use core::mem::size_of;
+use pinocchio::program_error::ProgramError;
+use pinocchio::pubkey::Pubkey;
+
+use crate::state::Lockup;
+
+/// Max seed length for `AuthorizeWithSeed` (matches Solana convention)
 pub const MAX_AUTHORITY_SEED_LEN: usize = 32;
 
 #[repr(C)]
@@ -14,114 +13,52 @@ pub const MAX_AUTHORITY_SEED_LEN: usize = 32;
 pub struct Authorized {
     /// Authority to manage the stake account (delegate, deactivate, split, merge)
     pub staker: Pubkey,
-
     /// Authority to withdraw funds from the stake account
     pub withdrawer: Pubkey,
 }
 
 impl Authorized {
+    #[inline]
     pub const fn size() -> usize {
-        core::mem::size_of::<Authorized>() // Removed the +8
+        core::mem::size_of::<Authorized>()
     }
 
+    #[inline]
     pub fn new(staker: Pubkey, withdrawer: Pubkey) -> Self {
         Self { staker, withdrawer }
     }
 
+    #[inline]
     pub fn is_staker(&self, pubkey: &Pubkey) -> bool {
         self.staker == *pubkey
     }
 
+    #[inline]
     pub fn is_withdrawer(&self, pubkey: &Pubkey) -> bool {
         self.withdrawer == *pubkey
     }
 
-    pub fn get_account_info(accounts: &AccountInfo) -> Result<&Self, ProgramError> {
-        if accounts.data_len() < Self::size() {
-            return Err(ProgramError::InvalidAccountData);
+    /// Simple signature check: did the required signer appear?
+    #[inline]
+    pub fn check(
+        &self,
+        signers: &[Pubkey],
+        which: StakeAuthorize,
+    ) -> Result<(), ProgramError> {
+        let required = match which {
+            StakeAuthorize::Staker => &self.staker,
+            StakeAuthorize::Withdrawer => &self.withdrawer,
+        };
+        if signers.iter().any(|k| k == required) {
+            Ok(())
+        } else {
+            Err(ProgramError::MissingRequiredSignature)
         }
-
-        Ok(unsafe { &*(accounts.borrow_data_unchecked().as_ptr() as *const Self) })
-    }
-
-    pub fn get_account_info_mut(accounts: &AccountInfo) -> Result<&mut Self, ProgramError> {
-        if accounts.data_len() < Self::size() {
-            return Err(ProgramError::InvalidAccountData);
-        }
-
-        Ok(unsafe { &mut *(accounts.borrow_mut_data_unchecked().as_ptr() as *mut Self) })
     }
 }
 
 #[repr(C)]
-pub struct Lockup {
-    /// Unix timestamp at which this stake will allow withdrawal, unless the transaction is signed by the custodian
-    pub unix_timestamp: UnixTimestamp,
-    /// Epoch height at which this stake will allow withdrawal, unless the transaction is signed by the custodian
-    pub epoch: Epoch,
-    // Custodian signature on a transaction exempts the operation from lockup constraints
-    pub custodian: Pubkey,
-}
-
-impl Lockup {
-    pub const fn size() -> usize {
-        core::mem::size_of::<Lockup>()
-    }
-
-    /// Create a new lockup
-    pub fn new(unix_timestamp: i64, epoch: u64, custodian: Pubkey) -> Self {
-        Self {
-            unix_timestamp,
-            epoch,
-            custodian,
-        }
-    }
-
-    /// Check if the lockup is active for the given timestamp and epoch
-    pub fn is_active(&self, current_timestamp: i64, current_epoch: u64) -> bool {
-        current_timestamp < self.unix_timestamp || current_epoch < self.epoch
-    }
-
-    pub fn get_account_info(account: &AccountInfo) -> Result<&Self, ProgramError> {
-        if account.data_len() < Self::size() {
-            return Err(ProgramError::InvalidAccountData);
-        };
-
-        if account.owner() != &crate::ID {
-            return Err(ProgramError::IncorrectProgramId);
-        };
-
-        return Ok(unsafe { &*(account.borrow_data_unchecked().as_ptr() as *const Self) });
-    }
-
-    pub fn get_account_info_mut(account: &AccountInfo) -> Result<&mut Self, ProgramError> {
-        if account.data_len() < Self::size() {
-            return Err(ProgramError::InvalidAccountData);
-        };
-
-        if !account.is_writable() {
-            return Err(ProgramError::InvalidAccountData);
-        };
-
-        if account.owner() != &crate::ID {
-            return Err(ProgramError::IncorrectProgramId);
-        };
-
-        return Ok(unsafe { &mut *(account.borrow_mut_data_unchecked().as_ptr() as *mut Self) });
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-#[repr(C)]
-pub struct Stake {
-    /// Delegation information
-    pub delegation: Delegation,
-    /// Credits observed during the epoch
-    pub credits_observed: u64,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Delegation {
     /// To whom the stake is delegated
     pub voter_pubkey: Pubkey,
@@ -136,24 +73,33 @@ pub struct Delegation {
 }
 
 impl Delegation {
+    #[inline]
     pub fn size() -> usize {
         size_of::<Delegation>()
     }
 
-    /// Check if the delegation is active
+    #[inline]
     pub fn is_active(&self) -> bool {
         self.deactivation_epoch == u64::MAX
     }
 
-    /// Check if the delegation is fully activated
+    #[inline]
     pub fn is_fully_activated(&self, current_epoch: u64) -> bool {
         current_epoch >= self.activation_epoch
     }
 }
 
-/// Configuration parameters for the stake program
-#[derive(Debug, Clone, PartialEq)]
 #[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Stake {
+    /// Delegation information
+    pub delegation: Delegation,
+    /// Credits observed during the epoch
+    pub credits_observed: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Config {
     /// How much stake we can activate/deactivate per-epoch as a fraction of currently effective stake
     pub warmup_cooldown_rate: f64,
@@ -162,6 +108,7 @@ pub struct Config {
 }
 
 impl Config {
+    #[inline]
     pub const fn size() -> usize {
         core::mem::size_of::<Config>()
     }
@@ -175,73 +122,78 @@ pub struct InitializeData {
 }
 
 impl InitializeData {
+    #[inline]
     pub const fn size() -> usize {
         Authorized::size() + Lockup::size()
     }
 }
 
-// Delegate stake instruction data
-#[derive(Debug, Clone, PartialEq)]
+/// Delegate stake instruction data
 #[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DelegateStakeData {
     pub vote_pubkey: Pubkey,
 }
 
 impl DelegateStakeData {
+    #[inline]
     pub const fn size() -> usize {
         core::mem::size_of::<DelegateStakeData>()
     }
 }
 
-// Split stake instruction data
-#[derive(Debug, Clone, PartialEq)]
+/// Split stake instruction data
 #[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SplitData {
     pub lamports: u64,
 }
 
 impl SplitData {
+    #[inline]
     pub const fn size() -> usize {
         core::mem::size_of::<SplitData>()
     }
 }
 
-// Withdraw instruction data
-#[derive(Debug, Clone, PartialEq)]
+/// Withdraw instruction data
 #[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WithdrawData {
     pub lamports: u64,
 }
 
 impl WithdrawData {
+    #[inline]
     pub const fn size() -> usize {
         core::mem::size_of::<WithdrawData>()
     }
 }
 
-// Authorize instruction data
-#[derive(Debug, Clone, PartialEq)]
+/// Authorize instruction data
 #[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AuthorizeData {
     pub new_authorized: Pubkey,
     pub stake_authorize: StakeAuthorize,
 }
 
 impl AuthorizeData {
+    #[inline]
     pub const fn size() -> usize {
         core::mem::size_of::<AuthorizeData>()
     }
 }
 
-/// Types of stake authorization
-#[derive(Debug, Clone, PartialEq)]
+/// Types of stake authorization (wire-encoded as a single byte)
 #[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StakeAuthorize {
     Staker = 0,
     Withdrawer = 1,
 }
 
-/// Authorize with seed instruction data
+/// Authorize-with-seed instruction data (parsed view over raw bytes)
 #[repr(C)]
 pub struct AuthorizeWithSeedData<'a> {
     pub new_authorized: Pubkey,
@@ -251,45 +203,40 @@ pub struct AuthorizeWithSeedData<'a> {
 }
 
 impl<'a> AuthorizeWithSeedData<'a> {
+    #[inline]
     pub const fn size() -> usize {
         core::mem::size_of::<AuthorizeWithSeedData>()
     }
 
-   pub fn parse(data: &'a [u8]) -> Result<Self, ProgramError> {
-        // Expected format:
-        // [0..32] - new_authorized pubkey
-        // [32] - stake_authorize (0 or 1) 
-        // [33] - seed length
-        // [34..34+seed_len] - authority_seed
-        // [34+seed_len..66+seed_len] - authority_owner pubkey
-        
-        if data.len() < 34 + 32 { 
+    /// Parse wire format:
+    /// [0..32) new_authorized | [32] auth (0/1) | [33] seed_len |
+    /// [34..34+seed_len) seed | [..+32) owner pubkey
+    pub fn parse(data: &'a [u8]) -> Result<Self, ProgramError> {
+        if data.len() < 34 + 32 {
             return Err(ProgramError::InvalidInstructionData);
         }
 
-        // Fix: use [0..32] not [0..33]
-        let new_authorized = Pubkey::try_from(&data[0..32])
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
+        let mut new_authorized = [0u8; 32];
+        new_authorized.copy_from_slice(&data[0..32]);
 
         let stake_authorize = match data[32] {
             0 => StakeAuthorize::Staker,
             1 => StakeAuthorize::Withdrawer,
-            _ => return Err(ProgramError::InvalidInstructionData), 
+            _ => return Err(ProgramError::InvalidInstructionData),
         };
 
         let seed_len = data[33] as usize;
-
-        if seed_len > 32 {
+        if seed_len > MAX_AUTHORITY_SEED_LEN {
             return Err(ProgramError::InvalidInstructionData);
         }
-
         if data.len() < 34 + seed_len + 32 {
             return Err(ProgramError::InvalidInstructionData);
         }
 
         let authority_seed = &data[34..34 + seed_len];
-        let authority_owner = Pubkey::try_from(&data[34 + seed_len..34 + seed_len + 32])
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
+
+        let mut authority_owner = [0u8; 32];
+        authority_owner.copy_from_slice(&data[34 + seed_len..34 + seed_len + 32]);
 
         Ok(Self {
             new_authorized,
@@ -300,6 +247,7 @@ impl<'a> AuthorizeWithSeedData<'a> {
     }
 }
 
+/// Helper used by SetLockup ix builders (kept as-is because other code may use it)
 #[derive(Clone)]
 pub struct SetLockupData {
     pub unix_timestamp: Option<i64>,
@@ -308,9 +256,11 @@ pub struct SetLockupData {
 }
 
 impl SetLockupData {
-    pub const LEN: usize = 1 + 8 + 1 + 8 + 1 + 32; // flags + timestamp + flag + epoch + flag + pubkey
+    pub const LEN: usize = 1 + 8 + 1 + 8 + 1 + 32; // flags + ts + flag + epoch + flag + pubkey
 
+    #[inline]
     pub fn instruction_data(data: &[u8]) -> &mut Self {
+        // SAFETY: the caller ensures the layout/length matches
         unsafe { &mut *(data.as_ptr() as *mut Self) }
     }
 }

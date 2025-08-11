@@ -1,4 +1,3 @@
-//! Processor for the `DeactivateDelinquent` instruction.
 
 #![allow(clippy::result_large_err)]
 
@@ -33,18 +32,18 @@ pub fn process_deactivate_delinquent(accounts: &[AccountInfo]) -> Result<(), Pro
 
     let delinquent_vs = vote_state(delinquent_vote_ai)?;
     let reference_vs = vote_state(reference_vote_ai)?;
-
+//Check Reference Validator is Active
     if !acceptable_reference_epoch_credits(&reference_vs.epoch_credits, clock.epoch) {
         return Err(StakeError::InsufficientReferenceVotes.into());
     }
 
     match stake_state(stake_ai)? {
         StakeStateV2::Stake(meta, mut stake, flags) => {
-           
+           //Verify Delegation Match
             if stake.delegation.voter_pubkey != *delinquent_vote_ai.key() {
                 return Err(StakeError::VoteAddressMismatch.into());
             }
-
+            //Check Delinquency and Deactivate
             if eligible_for_deactivate_delinquent(&delinquent_vs.epoch_credits, clock.epoch) {
                 stake.delegation.deactivation_epoch = clock.epoch;
                 overwrite_stake_state(stake_ai, &StakeStateV2::Stake(meta, stake, flags))
@@ -57,7 +56,7 @@ pub fn process_deactivate_delinquent(accounts: &[AccountInfo]) -> Result<(), Pro
 }
 
 // ========== HELPER FUNCTIONS ==========
-
+//checks the account is owned by the Vote program
 fn vote_state(ai: &AccountInfo) -> Result<Box<VoteState>, ProgramError> {
     if ai.owner() != &vote_program_id() {
         return Err(ProgramError::IncorrectProgramId);
@@ -73,7 +72,7 @@ fn vote_state(ai: &AccountInfo) -> Result<Box<VoteState>, ProgramError> {
         epoch_credits: credits,
     }))
 }
-
+//Checks the account is owned by our Stake program
 fn stake_state(ai: &AccountInfo) -> Result<StakeStateV2, ProgramError> {
     if ai.owner() != &id() {
         return Err(ProgramError::InvalidAccountOwner);
@@ -81,7 +80,7 @@ fn stake_state(ai: &AccountInfo) -> Result<StakeStateV2, ProgramError> {
     let data = ai.try_borrow_data()?;
     StakeStateV2::deserialize(&data)
 }
-
+//Ensures we own the account and it's marked as writable before modifying.
 fn overwrite_stake_state(ai: &AccountInfo, s: &StakeStateV2) -> Result<(), ProgramError> {
     if ai.owner() != &id() || !ai.is_writable() {
         return Err(ProgramError::InvalidAccountData);
@@ -89,7 +88,7 @@ fn overwrite_stake_state(ai: &AccountInfo, s: &StakeStateV2) -> Result<(), Progr
     let mut data = ai.try_borrow_mut_data()?;
     s.serialize(&mut data)
 }
-
+//Returns true if the validator voted within the last epoch (difference ≤ 1)
 fn acceptable_reference_epoch_credits(
     epoch_credits: &[(u64, u64, u64)], 
     current_epoch: u64
@@ -98,7 +97,7 @@ fn acceptable_reference_epoch_credits(
         current_epoch.saturating_sub(*epoch) <= 1
     })
 }
-
+//Returns true if NO votes exist within the last 4 epochs 
 fn eligible_for_deactivate_delinquent(
     epoch_credits: &[(u64, u64, u64)], 
     current_epoch: u64

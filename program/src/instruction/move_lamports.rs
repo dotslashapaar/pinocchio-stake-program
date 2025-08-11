@@ -1,5 +1,3 @@
-// This file handles moving lamports between stake accounts
-
 
 use alloc::collections::BTreeSet;
 
@@ -11,16 +9,9 @@ use pinocchio::{
     pubkey::Pubkey,
 };
 use pinocchio::ProgramResult;
-use crate::{
-    id,
-    state::{
-        stake_state_v2::StakeStateV2,
-        state::Meta,
-        delegation::Stake,
-        accounts::{Authorized, Lockup, StakeAuthorize},
-        stake_flag::StakeFlags,
-    },
-};
+use crate::state::{Authorized, Meta, Stake, StakeAuthorize, StakeStateV2};
+use crate::state::stake_flag::StakeFlags;
+use crate::id;
 // ============== LOCAL DEFINITIONS ==============
 
 #[derive(Clone, Debug)]
@@ -96,7 +87,7 @@ pub fn process_move_lamports(accounts: &[AccountInfo], lamports: u64) -> Program
         MergeKind::FullyActive(source_meta, source_stake) => {
             // Convert [u8; 8] fields to u64
             let rent_reserve = u64::from_le_bytes(source_meta.rent_exempt_reserve);
-            let stake_amount = u64::from_le_bytes(source_stake.delegation.stake);
+            let stake_amount = source_stake.delegation.stake;
             
             source_stake_ai
                 .lamports()
