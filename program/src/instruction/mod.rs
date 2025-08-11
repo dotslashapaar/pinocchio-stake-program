@@ -12,6 +12,9 @@ pub use process_set_lockup::*;
 pub mod process_authorized_with_seeds;
 pub use process_authorized_with_seeds::*;
 
+pub mod authorize;
+pub use authorize::*;
+
 #[repr(u8)]
 pub enum StakeInstruction {
     Initialize,
