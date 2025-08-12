@@ -1,39 +1,101 @@
-use alloc::vec::Vec;                 
-use pinocchio::pubkey::Pubkey;
 
-#[repr(C)]
-#[derive(Clone, Debug)]
+use pinocchio::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
+
+/// (epoch, credits, prev_credits)
+pub type EpochCredits = (u64, u64, u64);
+
+pub const MAX_EPOCH_CREDITS: usize = 64;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EpochCreditsList {
+    len: usize,
+    items: [EpochCredits; MAX_EPOCH_CREDITS],
+}
+
+impl EpochCreditsList {
+    #[inline]
+    pub const fn new() -> Self {
+       
+        Self { len: 0, items: [(0, 0, 0); MAX_EPOCH_CREDITS] }
+    }
+
+    #[inline]
+    pub fn push(&mut self, ec: EpochCredits) -> bool {
+        if self.len == MAX_EPOCH_CREDITS {
+            return false;
+        }
+        self.items[self.len] = ec;
+        self.len += 1;
+        true
+    }
+
+    #[inline]
+    pub fn as_slice(&self) -> &[EpochCredits] {
+        &self.items[..self.len]
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct VoteState {
-    pub node_pubkey: Pubkey,
-    pub authorized_withdrawer: Pubkey,
-    pub commission: u8,
-    pub votes: [u8; 1600],           
-    pub root_slot: Option<u64>,
-    pub epoch_credits: Vec<(u64, u64, u64)>,
+    pub epoch_credits: EpochCreditsList,
+    
 }
 
+impl VoteState {
+    
+    #[inline]
+    pub fn epoch_credits_as_slice(&self) -> &[EpochCredits] {
+        self.epoch_credits.as_slice()
+    }
 
-mod vote_program {
-    pinocchio_pubkey::declare_id!("Vote111111111111111111111111111111111111111");
+    #[inline]
+    pub fn from_account_info(ai: &AccountInfo) -> Result<Self, ProgramError> {
+        let data = ai.try_borrow_data()?;
+        Self::from_bytes(&data)
+    }
+
+    #[inline]
+    pub fn from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
+        let list = parse_epoch_credits(data).ok_or(ProgramError::InvalidAccountData)?;
+        Ok(Self { epoch_credits: list })
+    }
 }
 
-pub fn vote_program_id() -> Pubkey {
-    vote_program::id()
-}
-
-
-pub fn parse_epoch_credits(data: &[u8]) -> Option<Vec<(u64, u64, u64)>> {
-    if data.len() % 24 != 0 {
+#[inline]
+pub fn parse_epoch_credits(data: &[u8]) -> Option<EpochCreditsList> {
+    if data.len() < 4 {
         return None;
     }
-    let mut out = Vec::new();
-    let mut i = 0usize;
-    while i + 24 <= data.len() {
-        let e = u64::from_le_bytes(data[i..i + 8].try_into().ok()?);
-        let c = u64::from_le_bytes(data[i + 8..i + 16].try_into().ok()?);
-        let p = u64::from_le_bytes(data[i + 16..i + 24].try_into().ok()?);
-        out.push((e, c, p));
-        i += 24;
+    let mut n_bytes = [0u8; 4];
+    n_bytes.copy_from_slice(&data[0..4]);
+    let n = u32::from_le_bytes(n_bytes) as usize;
+
+    let need = 4 + n * (8 * 3);
+    if data.len() < need {
+        return None;
     }
-    Some(out)
+
+    let mut list = EpochCreditsList::new();
+    let mut off = 4;
+    for _ in 0..n {
+        let mut e = [0u8; 8];
+        let mut c = [0u8; 8];
+        let mut p = [0u8; 8];
+        e.copy_from_slice(&data[off..off + 8]); off += 8;
+        c.copy_from_slice(&data[off..off + 8]); off += 8;
+        p.copy_from_slice(&data[off..off + 8]); off += 8;
+        let _ = list.push((u64::from_le_bytes(e), u64::from_le_bytes(c), u64::from_le_bytes(p)));
+    }
+    Some(list)
+}
+
+#[inline]
+pub fn parse_epoch_credits_slice(data: &[u8]) -> Option<EpochCreditsList> {
+    parse_epoch_credits(data)
+}
+
+#[inline]
+pub fn vote_program_id() -> Pubkey {
+
+    Pubkey::default()
 }
