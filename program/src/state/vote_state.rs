@@ -42,7 +42,21 @@ pub struct VoteState {
 }
 
 impl VoteState {
-    
+      #[inline]
+    pub fn credits(&self) -> u64 {
+        match self.epoch_credits.as_slice().last() {
+            Some((_, credits, _prev)) => *credits,
+            None => 0,
+        }
+    }
+       #[inline]
+    pub fn credits_for_epoch(&self, epoch: u64) -> Option<u64> {
+        self.epoch_credits
+            .as_slice()
+            .iter()
+            .find(|(e, _, _)| *e == epoch)
+            .map(|(_, credits, _)| *credits)
+    }
     #[inline]
     pub fn epoch_credits_as_slice(&self) -> &[EpochCredits] {
         self.epoch_credits.as_slice()

@@ -1,7 +1,8 @@
-use crate::state::delegation::Stake;
+use crate::state::accounts::Stake;
 use crate::state::stake_flag::StakeFlags;
 use crate::state::state::Meta;
 use pinocchio::program_error::ProgramError;
+use pinocchio::sysvars::clock::Epoch;
 
 #[repr(u8)]
 pub enum StakeStateV2 {
@@ -10,7 +11,8 @@ pub enum StakeStateV2 {
     Stake(Meta, Stake, StakeFlags),
     RewardsPool,
 }
-
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StakeHistorySysvar(pub Epoch);
 impl StakeStateV2 {
     pub const ACCOUNT_SIZE: usize = 200;
 
