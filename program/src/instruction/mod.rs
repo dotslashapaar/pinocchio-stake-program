@@ -12,6 +12,10 @@ pub use process_set_lockup::*;
 pub mod process_authorized_with_seeds;
 pub use process_authorized_with_seeds::*;
 
+pub mod merge;
+pub mod merge_dedicated;
+pub use merge::*;
+
 pub mod process_delegate;
 pub use process_delegate::*;
 
