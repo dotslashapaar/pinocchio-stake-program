@@ -1,6 +1,6 @@
 #![no_std]
 #[cfg(not(feature = "no-entrypoint"))]
-mod entrypoint;
+pub mod entrypoint;
 
 #[cfg(feature = "std")]
 extern crate std;
