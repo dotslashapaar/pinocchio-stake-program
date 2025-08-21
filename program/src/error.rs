@@ -11,6 +11,8 @@ pub enum StakeError {
     VoteAddressMismatch,
     MergeMismatch,
     LockupInForce,
+    InsufficientReferenceVotes,
+    MinimumDelinquentEpochsForDeactivationNotMet
 }
 
 // map internal errors to standard program error
@@ -24,5 +26,7 @@ pub fn to_program_error(err: StakeError) -> ProgramError {
         StakeError::VoteAddressMismatch => ProgramError::Custom(0x13),
         StakeError::MergeMismatch => ProgramError::Custom(0x14),
         StakeError::LockupInForce => ProgramError::Custom(0x15),
+        StakeError::InsufficientReferenceVotes=> ProgramError::Custom(0x16),
+        StakeError::MinimumDelinquentEpochsForDeactivationNotMet=> ProgramError::Custom(0x17),
     }
 }
