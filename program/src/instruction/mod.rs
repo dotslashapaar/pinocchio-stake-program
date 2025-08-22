@@ -26,6 +26,10 @@ pub use process_move_stake::*;
 pub mod process_redelegate;
 pub use process_redelegate::*;
 
+pub mod deactivate_delinquent;
+pub use deactivate_delinquent::*;
+pub mod move_lamports;
+pub use move_lamports::*;
 
 #[repr(u8)]
 pub enum StakeInstruction {

@@ -24,6 +24,18 @@ fn process_instruction(
         .ok_or(ProgramError::InvalidInstructionData)?;
 
     match StakeInstruction::try_from(ix_disc)? {
+        StakeInstruction::DeactivateDelinquent => {
+                instruction::deactivate_delinquent::process_deactivate_delinquent(accounts)
+            }
+
+            StakeInstruction::MoveLamports => {
+                if instruction_data.len() != 8 {
+                    return Err(ProgramError::InvalidInstructionData);
+                }
+                let lamports = u64::from_le_bytes(instruction_data.try_into().unwrap());
+                instruction::move_lamports::process_move_lamports(accounts, lamports)
+            }
+
         StakeInstruction::Initialize => {
             pinocchio::msg!("Instruction: Initialize");
             todo!()
