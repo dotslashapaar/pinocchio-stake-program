@@ -29,22 +29,34 @@ impl MergeKind {
     pub fn get_if_mergeable(
         stake_state: &StakeStateV2,
         lamports: u64,
-        _clock: &Clock,
-        _stake_history: &StakeHistorySysvar,
+        clock: &Clock,
+        stake_history: &StakeHistorySysvar,
     ) -> Result<Self, ProgramError> {
         match stake_state {
             StakeStateV2::Stake(meta, stake, flags) => {
-                
-                if u64::from_le_bytes(stake.delegation.deactivation_epoch) == u64::MAX {
+                // Compute activation/deactivation at current epoch
+                let status = stake.delegation.stake_activating_and_deactivating(
+                    clock.epoch.to_le_bytes(),
+                    stake_history,
+                   crate::helpers::PERPETUAL_NEW_WARMUP_COOLDOWN_RATE_EPOCH,
+                );
+                let eff  = u64::from_le_bytes(status.effective);
+                let act  = u64::from_le_bytes(status.activating);
+                let deac = u64::from_le_bytes(status.deactivating);
+                let delegated = u64::from_le_bytes(stake.delegation.stake);
+
+                if act == 0 && deac == 0 && eff == delegated {
                     Ok(MergeKind::FullyActive(meta.clone(), stake.clone()))
-                } else {
+                } else if eff == 0 && act == 0 && deac == 0 {
                     Ok(MergeKind::Inactive(meta.clone(), lamports, flags.clone()))
+                } else {
+                    // Partly activating or deactivating => not mergeable for MoveLamports
+                    Err(ProgramError::InvalidAccountData)
                 }
             }
             _ => Err(ProgramError::InvalidAccountData),
         }
     }
-
     pub fn meta(&self) -> &Meta {
         match self {
             MergeKind::FullyActive(meta, _) => meta,
@@ -57,17 +69,29 @@ impl MergeKind {
     pub fn metas_can_merge(
         source_meta: &Meta,
         dest_meta: &Meta,
-        _clock: &Clock,
+        clock: &Clock,
     ) -> Result<(), ProgramError> {
-        if source_meta.authorized.staker == dest_meta.authorized.staker {
-            Ok(())
-        } else {
-            Err(ProgramError::InvalidArgument)
+        // staker must match
+        if source_meta.authorized.staker != dest_meta.authorized.staker {
+            return Err(ProgramError::InvalidArgument);
         }
+        // withdrawer must match
+        if source_meta.authorized.withdrawer != dest_meta.authorized.withdrawer {
+            return Err(ProgramError::InvalidArgument);
+        }
+        // if either lockup is in force, lockups must be identical
+        let src_in_force = source_meta.lockup.is_active(clock.unix_timestamp, clock.epoch);
+        let dst_in_force = dest_meta.lockup.is_active(clock.unix_timestamp, clock.epoch);
+        if src_in_force || dst_in_force {
+            if source_meta.lockup != dest_meta.lockup {
+                return Err(ProgramError::InvalidArgument);
+            }
+        }
+        Ok(())
     }
 }
 
-pub struct StakeHistorySysvar(pub u64);
+use crate::state::stake_history::StakeHistorySysvar;
 
 // ============== MAIN FUNCTIONS ==============
 
