@@ -1,3 +1,5 @@
+extern crate alloc;
+use alloc::collections::BTreeSet;
 use crate::helpers::constant::*;
 use crate::state::stake_history::StakeHistorySysvar;
 use pinocchio::{
@@ -314,4 +316,31 @@ pub fn get_sysvar(
 
 pub(crate) fn checked_add(a: u64, b: u64) -> Result<u64, ProgramError> {
     a.checked_add(b).ok_or(ProgramError::InsufficientFunds)
+}
+pub fn collect_signers_checked<'a>(
+    authority_info: Option<&'a AccountInfo>,
+    custodian_info: Option<&'a AccountInfo>,
+) -> Result<(BTreeSet<Pubkey>, Option<&'a Pubkey>), ProgramError> {
+    let mut signers = BTreeSet::new();
+
+    if let Some(ai) = authority_info {
+        if ai.is_signer() {
+            signers.insert(*ai.key());
+        } else {
+            return Err(ProgramError::MissingRequiredSignature);
+        }
+    }
+
+    let custodian = if let Some(ci) = custodian_info {
+        if ci.is_signer() {
+            signers.insert(*ci.key());
+            Some(ci.key())
+        } else {
+            return Err(ProgramError::MissingRequiredSignature);
+        }
+    } else {
+        None
+    };
+
+    Ok((signers, custodian))
 }

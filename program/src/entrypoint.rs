@@ -54,7 +54,8 @@ fn process_instruction(
         }
         StakeInstruction::Withdraw => {
             pinocchio::msg!("Instruction: Withdraw");
-            todo!()
+            let lamports = u64::from_le_bytes(instruction_data.try_into().unwrap());
+            instruction::withdraw::process_withdraw(accounts,lamports)
         }
         StakeInstruction::Deactivate => {
             pinocchio::msg!("Instruction: Deactivate");
@@ -66,7 +67,8 @@ fn process_instruction(
         }
         StakeInstruction::Merge => {
             pinocchio::msg!("Instruction: Merge");
-            todo!()
+            todo!();
+            
         }
         StakeInstruction::AuthorizeWithSeed => {
             pinocchio::msg!("Instruction: AuthorizeWithSeed");

@@ -31,6 +31,10 @@ pub use deactivate_delinquent::*;
 pub mod move_lamports;
 pub use move_lamports::*;
 
+pub mod withdraw;
+pub use withdraw::*;
+
+
 #[repr(u8)]
 pub enum StakeInstruction {
     Initialize,
