@@ -4,9 +4,25 @@ use pinocchio::{
 };
 
 use crate::{
-    helpers::{collect_signers, next_account_info, MAXIMUM_SIGNERS},
+    helpers::{collect_signers, MAXIMUM_SIGNERS},
     state::{accounts::AuthorizeData, stake_state_v2::StakeStateV2, state::Meta, StakeAuthorize},
 };
+
+// No-std compatible helper function that matches native Lockup::is_in_force behavior
+fn is_lockup_in_force(
+    lockup_unix_timestamp: i64,
+    lockup_epoch: u64,
+    custodian: &Pubkey,
+    clock: &Clock,
+    provided_custodian: Option<&Pubkey>,
+) -> bool {
+    // If the provided custodian matches the lockup custodian, lockup is bypassed
+    if provided_custodian == Some(custodian) {
+        return false;
+    }
+    // Otherwise, check if either timestamp or epoch constraint is still active
+    lockup_unix_timestamp > clock.unix_timestamp || lockup_epoch > clock.epoch
+}
 
 // [0..32] new_authorized pubkey | [32] role (0=Staker, 1=Withdrawer)
 fn parse_authorize_data(data: &[u8]) -> Result<AuthorizeData, ProgramError> {
@@ -96,10 +112,14 @@ fn apply_authorize(
 ) -> ProgramResult {
     match authorize_data.stake_authorize {
         StakeAuthorize::Staker => {
-            // staker change requires current staker signature
-            if !signer_contains(&meta.authorized.staker) {
+            // FIX: allows either the staker OR withdrawer to change the staker authority
+            let staker_signed = signer_contains(&meta.authorized.staker);
+            let withdrawer_signed = signer_contains(&meta.authorized.withdrawer);
+
+            if !(staker_signed || withdrawer_signed) {
                 return Err(ProgramError::MissingRequiredSignature);
             }
+
             meta.authorized.staker = authorize_data.new_authorized;
         }
         StakeAuthorize::Withdrawer => {
@@ -108,16 +128,45 @@ fn apply_authorize(
                 return Err(ProgramError::MissingRequiredSignature);
             }
 
-            // Enforce lockup: if lockup active, require custodian signature
-            let lockup_active = meta.lockup.unix_timestamp > clock.unix_timestamp
-                || meta.lockup.epoch > clock.epoch;
-            if lockup_active {
-                if let Some(lockup_auth) = maybe_lockup_authority {
-                    if !(lockup_auth.is_signer() && lockup_auth.key() == &meta.lockup.custodian) {
+            // LOCKUP VALIDATION: Two-step process
+            // Step 1: Check if lockup is active (without considering custodian)
+            let lockup_in_force_without_custodian = is_lockup_in_force(
+                meta.lockup.unix_timestamp,
+                meta.lockup.epoch,
+                &meta.lockup.custodian,
+                clock,
+                None, // Don't consider any custodian for this check
+            );
+
+            if lockup_in_force_without_custodian {
+                match maybe_lockup_authority {
+                    None => {
+                        // Native would return StakeError::CustodianMissing, using generic for now
                         return Err(ProgramError::MissingRequiredSignature);
                     }
-                } else {
-                    return Err(ProgramError::MissingRequiredSignature);
+                    Some(lockup_auth) => {
+                        if !lockup_auth.is_signer() {
+                            // Native would return StakeError::CustodianSignatureMissing, using generic for now
+                            return Err(ProgramError::MissingRequiredSignature);
+                        }
+
+                        // Step 2: Check if lockup is STILL active even WITH the provided custodian
+                        // This catches the case where wrong custodian is provided
+                        let lockup_still_in_force_with_custodian = is_lockup_in_force(
+                            meta.lockup.unix_timestamp,
+                            meta.lockup.epoch,
+                            &meta.lockup.custodian,
+                            clock,
+                            Some(lockup_auth.key()), // Now consider the provided custodian
+                        );
+
+                        if lockup_still_in_force_with_custodian {
+                            // Native would return StakeError::LockupInForce, using generic for now
+                            return Err(ProgramError::MissingRequiredSignature);
+                        }
+
+                        // At this point: lockup was active, but correct custodian signed, so we can proceed
+                    }
                 }
             }
 
