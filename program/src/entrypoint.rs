@@ -4,6 +4,7 @@ use pinocchio::{
     program_error::ProgramError, pubkey::Pubkey, ProgramResult,
 };
 
+
 // This is the entrypoint for the program.
 program_entrypoint!(process_instruction);
 //Do not allocate memory.
@@ -40,7 +41,8 @@ fn process_instruction(
         }
         StakeInstruction::Withdraw => {
             pinocchio::msg!("Instruction: Withdraw");
-            todo!()
+           let lamports = u64::from_le_bytes(instruction_data.try_into().unwrap());
+            instruction::withdraw::process_withdraw(accounts,lamports)
         }
         StakeInstruction::Deactivate => {
             pinocchio::msg!("Instruction: Deactivate");
@@ -54,10 +56,15 @@ fn process_instruction(
             pinocchio::msg!("Instruction: Merge");
             todo!()
         }
+       
         StakeInstruction::AuthorizeWithSeed => {
             pinocchio::msg!("Instruction: AuthorizeWithSeed");
-            todo!()
-        }
+             let (_, payload) = instruction_data
+            .split_first()
+            .ok_or(ProgramError::InvalidInstructionData)?;
+
+            instruction::process_authorized_with_seeds(accounts, payload)
+         }
         StakeInstruction::InitializeChecked => {
             pinocchio::msg!("Instruction: InitializeChecked");
             todo!()
@@ -80,7 +87,7 @@ fn process_instruction(
         }
         StakeInstruction::DeactivateDelinquent => {
             pinocchio::msg!("Instruction: DeactivateDelinquent");
-            todo!()
+            instruction::deactivate_delinquent::process_deactivate_delinquent(accounts)
         }
         #[allow(deprecated)]
         StakeInstruction::Redelegate => Err(ProgramError::InvalidInstructionData),
@@ -92,7 +99,11 @@ fn process_instruction(
         }
         StakeInstruction::MoveLamports => {
             pinocchio::msg!("Instruction: MoveLamports");
-            todo!()
+            if instruction_data.len() != 8 {
+                    return Err(ProgramError::InvalidInstructionData);
+                }
+                let lamports = u64::from_le_bytes(instruction_data.try_into().unwrap());
+                instruction::move_lamports::process_move_lamports(accounts, lamports)
         }
     }
 }

@@ -1,40 +1,50 @@
 #![allow(clippy::result_large_err)]
 extern crate alloc;
+
 use pinocchio::{
     account_info::AccountInfo,
     msg,
     program_error::ProgramError,
+    pubkey::Pubkey,
     sysvars::{clock::Clock, Sysvar},
+    ProgramResult,
 };
 
 use crate::{
     error::{to_program_error, StakeError},
+    helpers::{get_stake_state, next_account_info, set_stake_state},
     id,
-    state::stake_state_v2::StakeStateV2,
-    state::vote_state::vote_program_id,
+    state::{
+        stake_state_v2::StakeStateV2,
+        vote_state::vote_program_id,
+    },
 };
-use pinocchio::pubkey::Pubkey;
-pub fn process_deactivate_delinquent(accounts: &[AccountInfo]) -> Result<(), ProgramError> {
+use crate::helpers::constant::MINIMUM_DELINQUENT_EPOCHS_FOR_DEACTIVATION;
+
+pub fn process_deactivate_delinquent(accounts: &[AccountInfo]) -> ProgramResult {
     msg!("Instruction: DeactivateDelinquent");
 
-    let mut iter = accounts.iter();
-    let stake_ai           = iter.next().ok_or(ProgramError::NotEnoughAccountKeys)?;
-    let delinquent_vote_ai = iter.next().ok_or(ProgramError::NotEnoughAccountKeys)?;
-    let reference_vote_ai  = iter.next().ok_or(ProgramError::NotEnoughAccountKeys)?;
+    // --- Accounts: stake, delinquent_vote, reference_vote ---
+    let iter = &mut accounts.iter();
+    let stake_ai           = next_account_info(iter)?;
+    let delinquent_vote_ai = next_account_info(iter)?;
+    let reference_vote_ai  = next_account_info(iter)?;
 
+    // --- Clock (native uses the current epoch) ---
     let clock = Clock::get()?;
-    const MINIMUM_DELINQUENT_EPOCHS_FOR_DEACTIVATION: u64 = 5;
-    // Optional: Only enforce owner check if your vote_program_id() is set to a real program id.
+
+    // --- Optional owner check for vote accounts (mirrors your existing pattern) ---
     let vote_pid = vote_program_id();
     if vote_pid != Pubkey::default() {
         if *reference_vote_ai.owner() != vote_pid || *delinquent_vote_ai.owner() != vote_pid {
             return Err(ProgramError::IncorrectProgramId);
         }
     }
-    // 1) Reference validator must have a vote in EACH of the last N epochs
+
+    // --- 1) Reference must have a vote in EACH of the last N epochs (strict consecutive) ---
     {
-       let data = reference_vote_ai.try_borrow_data()?;
-        let ok = has_consecutive_votes_last_n_epochs(
+        let data = reference_vote_ai.try_borrow_data()?;
+        let ok = acceptable_reference_epoch_credits_bytes(
             &data,
             clock.epoch,
             MINIMUM_DELINQUENT_EPOCHS_FOR_DEACTIVATION,
@@ -42,40 +52,32 @@ pub fn process_deactivate_delinquent(accounts: &[AccountInfo]) -> Result<(), Pro
         if !ok {
             return Err(to_program_error(StakeError::InsufficientReferenceVotes));
         }
-    } 
+    }
 
-    // 2) Delinquent validator: last vote epoch <= (current_epoch - N)
-   let delinquent_is_eligible = {
-    let data = delinquent_vote_ai.try_borrow_data()?;
-    let last = last_vote_epoch(&data)?;
-    match last {
-        None => true, // never voted => eligible
-        Some(last_epoch) => {
-            if let Some(min_epoch) =
-                clock.epoch.checked_sub(MINIMUM_DELINQUENT_EPOCHS_FOR_DEACTIVATION)
-            {
-                last_epoch <= min_epoch
-            } else {
-                false
+    // --- 2) Delinquent last vote epoch <= current_epoch - N  ---
+    let delinquent_is_eligible = {
+        let data = delinquent_vote_ai.try_borrow_data()?;
+        match last_vote_epoch_bytes(&data)? {
+            None => true, // never voted => eligible
+            Some(last_epoch) => match clock.epoch.checked_sub(MINIMUM_DELINQUENT_EPOCHS_FOR_DEACTIVATION) {
+                Some(min_epoch) => last_epoch <= min_epoch,
+                None => false,
             }
         }
-    }
-};
+    };
 
-    match stake_state(stake_ai)? {
-        StakeStateV2::Stake(meta, mut stake, flags) => {
-            // Must be the same vote account this stake is delegated to
+    // --- 3) Load stake state, verify delegation target, deactivate if eligible ---
+    match get_stake_state(stake_ai)? {
+        StakeStateV2::Stake(mut meta, mut stake, flags) => {
             if stake.delegation.voter_pubkey != *delinquent_vote_ai.key() {
                 return Err(to_program_error(StakeError::VoteAddressMismatch));
             }
 
-            // if delinquent_is_eligible {
-            //     stake.delegation.deactivation_epoch = clock.epoch.to_le_bytes();
-            //     overwrite_stake_state(stake_ai, &StakeStateV2::Stake(meta, stake, flags))
-             if delinquent_is_eligible {
+            if delinquent_is_eligible {
+                // native sets deactivation_epoch = current epoch
                 stake.deactivate(clock.epoch.to_le_bytes())
                     .map_err(to_program_error)?;
-                overwrite_stake_state(stake_ai, &StakeStateV2::Stake(meta, stake, flags))
+                set_stake_state(stake_ai, &StakeStateV2::Stake(meta, stake, flags))
             } else {
                 Err(to_program_error(
                     StakeError::MinimumDelinquentEpochsForDeactivationNotMet,
@@ -87,101 +89,59 @@ pub fn process_deactivate_delinquent(accounts: &[AccountInfo]) -> Result<(), Pro
 }
 
 
-fn stake_state(ai: &AccountInfo) -> Result<StakeStateV2, ProgramError> {
-    if ai.owner() != &id() {
-        return Err(ProgramError::InvalidAccountOwner);
-    }
-    let data = ai.try_borrow_data()?;
-    StakeStateV2::deserialize(&data)
-}
-
-fn overwrite_stake_state(ai: &AccountInfo, s: &StakeStateV2) -> Result<(), ProgramError> {
-    if ai.owner() != &id() || !ai.is_writable() {
-        return Err(ProgramError::InvalidAccountData);
-    }
-    let mut data = ai.try_borrow_mut_data()?;
-    s.serialize(&mut data)
-}
-
-
-// fn has_vote_within_epochs(data: &[u8], current_epoch: u64, window: u64) -> Result<bool, ProgramError> {
-//     if data.len() < 4 {
-//         return Err(ProgramError::InvalidAccountData);
-//     }
-//     let mut n_bytes = [0u8; 4];
-//     n_bytes.copy_from_slice(&data[0..4]);
-//     let n = u32::from_le_bytes(n_bytes) as usize;
-
-//     let mut off = 4usize;
-//     for _ in 0..n {
-//         // Need 24 bytes per triple
-//         if off + 24 > data.len() {
-//             return Err(ProgramError::InvalidAccountData);
-//         }
-//         // read epoch (first 8 bytes)
-//         let mut e = [0u8; 8];
-//         e.copy_from_slice(&data[off..off + 8]);
-//         let epoch = u64::from_le_bytes(e);
-
-//         // skip credits + prev_credits (we don't need them here)
-//         off += 24;
-
-//         if current_epoch.saturating_sub(epoch) <= window {
-//             return Ok(true);
-//         }
-//     }
-//     Ok(false)
-// }
-
-// NEW: strict consecutive reference check (matches acceptable_reference_epoch_credits)
-// Require a vote in EACH of the last `n` epochs: current_epoch, current_epoch-1, ..., current_epoch-(n-1)
-fn has_consecutive_votes_last_n_epochs(
+fn acceptable_reference_epoch_credits_bytes(
     data: &[u8],
     current_epoch: u64,
     n: u64,
 ) -> Result<bool, ProgramError> {
-    if data.len() < 4 { return Err(ProgramError::InvalidAccountData); }
+    // Layout assumed by your existing code/tests:
+    // [0..4] u32 count, then `count` * (epoch:u64, credits:u64, prev:u64)
+    if data.len() < 4 {
+        return Err(ProgramError::InvalidAccountData);
+    }
     let mut n_bytes = [0u8; 4];
     n_bytes.copy_from_slice(&data[0..4]);
     let count = u32::from_le_bytes(n_bytes) as usize;
 
-    // Need enough entries to possibly cover n epochs
-    let need = 4usize + count.saturating_mul(24);
-    if data.len() < need { return Err(ProgramError::InvalidAccountData); }
+    if count < n as usize {
+        return Ok(false);
+    }
 
-    // Bitset for the last n epochs (n <= 64 by your MAX_EPOCH_CREDITS bound)
-    let mut seen: u64 = 0;
-    let mut off = 4usize;
-    for _ in 0..count {
+    // Start at the first of the last N entries and walk them in reverse
+    // to compare: last => current_epoch, previous => current_epoch - 1, ...
+    for i in 0..(n as usize) {
+        // index of the (count - 1 - i)-th entry
+        let entry_index = count - 1 - i;
+        let off = 4 + entry_index * 24;
+        if off + 8 > data.len() {
+            return Err(ProgramError::InvalidAccountData);
+        }
         let mut e = [0u8; 8];
         e.copy_from_slice(&data[off..off + 8]);
-        let epoch = u64::from_le_bytes(e);
-        off += 24; // skip credits + prev_credits too
+        let vote_epoch = u64::from_le_bytes(e);
 
-        if epoch <= current_epoch {
-            let delta = current_epoch.saturating_sub(epoch);
-            if delta < n {
-                // mark that epoch as seen
-                seen |= 1u64 << delta;
-                if seen.count_ones() as u64 == n {
-                    return Ok(true);
-                }
-            }
+        let expected = current_epoch.saturating_sub(i as u64);
+        if vote_epoch != expected {
+            return Ok(false);
         }
     }
-    Ok(false)
+    Ok(true)
 }
 
-// Last recorded vote epoch in the buffer (or None if empty)
-fn last_vote_epoch(data: &[u8]) -> Result<Option<u64>, ProgramError> {
-    if data.len() < 4 { return Err(ProgramError::InvalidAccountData); }
+fn last_vote_epoch_bytes(data: &[u8]) -> Result<Option<u64>, ProgramError> {
+    if data.len() < 4 {
+        return Err(ProgramError::InvalidAccountData);
+    }
     let mut n_bytes = [0u8; 4];
     n_bytes.copy_from_slice(&data[0..4]);
     let count = u32::from_le_bytes(n_bytes) as usize;
-    if count == 0 { return Ok(None); }
-    let need = 4usize + count.saturating_mul(24);
-    if data.len() < need { return Err(ProgramError::InvalidAccountData); }
+    if count == 0 {
+        return Ok(None);
+    }
     let off = 4 + (count - 1) * 24;
+    if off + 8 > data.len() {
+        return Err(ProgramError::InvalidAccountData);
+    }
     let mut e = [0u8; 8];
     e.copy_from_slice(&data[off..off + 8]);
     Ok(Some(u64::from_le_bytes(e)))
@@ -213,7 +173,7 @@ fn reference_has_all_last_n_epochs() {
         (99, 4, 3),
         (100, 5, 4),
     ]);
-    assert!(has_consecutive_votes_last_n_epochs(&bytes, current, 5).unwrap());
+    assert!(acceptable_reference_epoch_credits_bytes(&bytes, current, 5).unwrap());
 }
 
 #[test]
@@ -227,7 +187,7 @@ fn reference_missing_one_epoch_fails() {
         (99, 4, 3),
         (100, 5, 4),
     ]);
-    assert!(!has_consecutive_votes_last_n_epochs(&bytes, current, 5).unwrap());
+    assert!(!acceptable_reference_epoch_credits_bytes(&bytes, current, 5).unwrap());
 }
 
 #[test]
@@ -236,7 +196,7 @@ fn delinquent_if_last_vote_older_than_n() {
     // last=94 => 94 <= 95 => eligible (delinquent)
     let current = 100;
     let bytes = build_epoch_credits_bytes(&[(94, 5, 0)]);
-    let last = last_vote_epoch(&bytes).unwrap();
+    let last = last_vote_epoch_bytes(&bytes).unwrap();
     assert_eq!(last, Some(94));
     let min_epoch = current - 5;
     assert!(last.unwrap() <= min_epoch);
@@ -248,7 +208,7 @@ fn not_delinquent_if_last_vote_within_n() {
     // last=97 => 97 > 95 => NOT delinquent
     let current = 100;
     let bytes = build_epoch_credits_bytes(&[(97, 5, 0)]);
-    let last = last_vote_epoch(&bytes).unwrap();
+    let last = last_vote_epoch_bytes(&bytes).unwrap();
     assert_eq!(last, Some(97));
     let min_epoch = current - 5;
     assert!(!(last.unwrap() <= min_epoch));

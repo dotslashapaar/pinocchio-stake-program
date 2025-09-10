@@ -14,3 +14,4 @@ pub const NEW_WARMUP_COOLDOWN_RATE: f64 = 0.09;
 // passed since activation where all prior stake had escaped warmup/cooldown,
 // we can pretend the rate has always beein 9% without issue. so we do that
 pub const PERPETUAL_NEW_WARMUP_COOLDOWN_RATE_EPOCH: Option<[u8; 8]> = Some([0; 8]);
+pub const MINIMUM_DELINQUENT_EPOCHS_FOR_DEACTIVATION: u64 = 5;
