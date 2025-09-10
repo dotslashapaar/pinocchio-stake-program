@@ -1,10 +1,11 @@
 use crate::helpers::{bytes_to_u64, Epoch};
 use crate::state::accounts::Authorized;
-use pinocchio::sysvars::clock::Clock;
-use pinocchio::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
-
-pub type UnixTimestamp = [u8; 8]; // this is i64
-
+use pinocchio::{
+    account_info::AccountInfo,
+    program_error::ProgramError,
+    pubkey::Pubkey,
+    sysvars::clock::{Epoch, UnixTimestamp},
+};
 #[repr(C)]
 #[derive(Default, Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Lockup {
@@ -110,7 +111,7 @@ impl Lockup {
 
         return Ok(unsafe { &mut *(account.borrow_mut_data_unchecked().as_ptr() as *mut Self) });
     }
-     #[inline(always)]
+    #[inline(always)]
     pub fn is_in_force(&self, clock: &Clock, custodian_signer: Option<&[u8; 32]>) -> bool {
         // If a custodian is configured on the lockup and that custodian signed, lockup is bypassed
         let has_custodian = self.custodian != [0u8; 32];
@@ -123,12 +124,12 @@ impl Lockup {
         }
 
         // Decode LE-encoded fields
-        let unix_ts  = i64::from_le_bytes(self.unix_timestamp); // [u8;8] -> i64
-        let epoch_lo = u64::from_le_bytes(self.epoch);          // [u8;8] -> u64
+        let unix_ts = i64::from_le_bytes(self.unix_timestamp); // [u8;8] -> i64
+        let epoch_lo = u64::from_le_bytes(self.epoch); // [u8;8] -> u64
 
         // Lockup remains in force if *either* constraint hasn't passed yet.
-        let time_in_force  = unix_ts != 0 && clock.unix_timestamp < unix_ts;
-        let epoch_in_force = epoch_lo != 0 && clock.epoch         < epoch_lo;
+        let time_in_force = unix_ts != 0 && clock.unix_timestamp < unix_ts;
+        let epoch_in_force = epoch_lo != 0 && clock.epoch < epoch_lo;
 
         time_in_force || epoch_in_force
     }
