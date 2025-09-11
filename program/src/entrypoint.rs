@@ -1,4 +1,4 @@
-use crate::instruction::{self, StakeInstruction};
+use crate::{instruction::{self, StakeInstruction}, state::{AuthorizeCheckedWithSeedData, AuthorizeWithSeedData, StakeAuthorize}};
 use pinocchio::{
     account_info::AccountInfo, default_panic_handler, msg, no_allocator, program_entrypoint,
     program_error::ProgramError, pubkey::Pubkey, ProgramResult,
@@ -28,9 +28,68 @@ fn process_instruction(
             todo!()
         }
         StakeInstruction::Authorize => {
-            pinocchio::msg!("Instruction: Authorize");
-            todo!()
+        msg!("Instruction: Authorize");
+
+        // Expect exactly 33 bytes: [0..32]=new pubkey, [32]=role
+        if instruction_data.len() != 33 {
+            return Err(ProgramError::InvalidInstructionData);
         }
+
+        let mut pk = [0u8; 32];
+        pk.copy_from_slice(&instruction_data[..32]);
+       let new_authority = Pubkey::try_from(&instruction_data[..32])
+    .map_err(|_| ProgramError::InvalidInstructionData)?;
+
+        let authority_type = match instruction_data[32] {
+            0 => StakeAuthorize::Staker,
+            1 => StakeAuthorize::Withdrawer,
+            _ => return Err(ProgramError::InvalidInstructionData),
+        };
+
+        // Typed handler (native-style)
+        // fn process_authorize(accounts: &[AccountInfo], new_authority: Pubkey, authority_type: StakeAuthorize) -> ProgramResult
+        instruction::authorize::process_authorize(accounts, new_authority, authority_type)
+    }
+
+    StakeInstruction::AuthorizeWithSeed => {
+        msg!("Instruction: AuthorizeWithSeed");
+
+        // Parse into typed struct
+        let args = AuthorizeWithSeedData::parse(instruction_data)?;
+
+        // Typed handler (native-style)
+        // fn process_authorized_with_seeds(accounts: &[AccountInfo], args: AuthorizeWithSeedData) -> ProgramResult
+        instruction::process_authorized_with_seeds::process_authorized_with_seeds(accounts, args)
+    }
+
+    StakeInstruction::AuthorizeChecked => {
+        msg!("Instruction: AuthorizeChecked");
+
+        // Expect exactly 1 byte: 0=Staker, 1=Withdrawer
+        if instruction_data.len() != 1 {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+        let authority_type = match instruction_data[0] {
+            0 => StakeAuthorize::Staker,
+            1 => StakeAuthorize::Withdrawer,
+            _ => return Err(ProgramError::InvalidInstructionData),
+        };
+
+        // Typed handler (native-style)
+        // fn process_authorize_checked(accounts: &[AccountInfo], authority_type: StakeAuthorize) -> ProgramResult
+        instruction::authrorize_checked::process_authorize_checked(accounts, authority_type)
+    }
+
+    StakeInstruction::AuthorizeCheckedWithSeed => {
+        msg!("Instruction: AuthorizeCheckedWithSeed");
+
+        // Parse into typed struct
+        let args = AuthorizeCheckedWithSeedData::parse(instruction_data)?;
+
+        // Typed handler (native-style)
+        // fn process_authorize_checked_with_seed(accounts: &[AccountInfo], args: AuthorizeCheckedWithSeedData) -> ProgramResult
+        instruction::process_authorize_checked_with_seed::process_authorize_checked_with_seed(accounts, args)
+    }
         StakeInstruction::DelegateStake => {
             pinocchio::msg!("Instruction: DelegateStake");
             todo!()
@@ -46,7 +105,7 @@ fn process_instruction(
         }
         StakeInstruction::Deactivate => {
             pinocchio::msg!("Instruction: Deactivate");
-            todo!()
+            instruction::deactivate::process_deactivate(accounts)
         }
         StakeInstruction::SetLockup => {
             pinocchio::msg!("Instruction: SetLockup");
@@ -57,26 +116,11 @@ fn process_instruction(
             todo!()
         }
        
-        StakeInstruction::AuthorizeWithSeed => {
-            pinocchio::msg!("Instruction: AuthorizeWithSeed");
-             let (_, payload) = instruction_data
-            .split_first()
-            .ok_or(ProgramError::InvalidInstructionData)?;
-
-            instruction::process_authorized_with_seeds(accounts, payload)
-         }
-        StakeInstruction::InitializeChecked => {
+       StakeInstruction::InitializeChecked => {
             pinocchio::msg!("Instruction: InitializeChecked");
             todo!()
         }
-        StakeInstruction::AuthorizeChecked => {
-            pinocchio::msg!("Instruction: AuthorizeChecked");
-            todo!()
-        }
-        StakeInstruction::AuthorizeCheckedWithSeed => {
-            pinocchio::msg!("Instruction: AuthorizeCheckedWithSeed");
-            todo!()
-        }
+        
         StakeInstruction::SetLockupChecked => {
             pinocchio::msg!("Instruction: SetLockupChecked");
             todo!()

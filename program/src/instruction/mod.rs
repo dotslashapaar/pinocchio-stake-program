@@ -9,8 +9,17 @@ pub use split::*;
 pub mod process_set_lockup;
 pub use process_set_lockup::*;
 
+pub mod authorize;
+pub use authorize::*;
+
 pub mod process_authorized_with_seeds;
 pub use process_authorized_with_seeds::*;
+
+pub mod process_authorize_checked_with_seed;
+pub use process_authorize_checked_with_seed::*;
+
+pub mod authrorize_checked;
+pub use authrorize_checked::*;
 
 pub mod merge;
 pub mod merge_dedicated;
@@ -33,8 +42,8 @@ pub use move_lamports::*;
 pub mod withdraw;
 pub use withdraw::*;
 
-pub mod authorize;
-pub use authorize::*;
+pub mod deactivate;
+pub use deactivate::*;
 
 #[repr(u8)]
 pub enum StakeInstruction {
