@@ -34,6 +34,55 @@ pub enum ErrorCode {
     TOOMANYSIGNERS = 0x1,
 }
 
+// Helper function to create a pubkey with seed (similar to solana_program::pubkey::Pubkey::create_with_seed)
+pub fn create_with_seed(base: &Pubkey, seed: &str, owner: &Pubkey) -> Result<Pubkey, ProgramError> {
+    if seed.len() > 32 {
+        return Err(ProgramError::MaxSeedLengthExceeded);
+    }
+
+    #[cfg(target_os = "solana")]
+    {
+        // Create the hash input by concatenating base + seed + owner
+        let seed_bytes = seed.as_bytes();
+        let total_len = 32 + seed_bytes.len() + 32; // base (32) + seed + owner (32)
+
+        // We need to create a contiguous buffer
+        let mut buffer = alloc::vec::Vec::with_capacity(total_len);
+        buffer.extend_from_slice(base);
+        buffer.extend_from_slice(seed_bytes);
+        buffer.extend_from_slice(owner);
+
+        let mut hash_result = [0u8; 32];
+        unsafe {
+            pinocchio::syscalls::sol_sha256(
+                buffer.as_ptr(),
+                buffer.len() as u64,
+                hash_result.as_mut_ptr(),
+            );
+        }
+        Ok(hash_result)
+    }
+
+    #[cfg(not(target_os = "solana"))]
+    {
+        // For non-Solana targets (tests), we'll return a deterministic result
+        // This is a simplified version for testing
+        let mut result = [0u8; 32];
+        result[..32].copy_from_slice(base);
+        // Simple XOR with seed and owner for deterministic but different result
+        let seed_bytes = seed.as_bytes();
+        for (i, &byte) in seed_bytes.iter().enumerate() {
+            if i < 32 {
+                result[i] ^= byte;
+            }
+        }
+        for (i, &byte) in owner.iter().enumerate() {
+            result[i] ^= byte;
+        }
+        Ok(result)
+    }
+}
+
 // almost all native stake program processors accumulate every account signer
 // they then defer all signer validation to functions on Meta or Authorized
 // this results in an instruction interface that is much looser than the one documented

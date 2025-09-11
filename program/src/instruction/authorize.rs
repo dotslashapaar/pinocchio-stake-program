@@ -103,7 +103,7 @@ pub fn process_authorize(accounts: &[AccountInfo], instruction_data: &[u8]) -> P
     Ok(())
 }
 
-fn apply_authorize(
+pub fn apply_authorize(
     meta: &mut Meta,
     authorize_data: &AuthorizeData,
     maybe_lockup_authority: Option<&AccountInfo>,

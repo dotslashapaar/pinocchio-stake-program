@@ -1,17 +1,13 @@
 use pinocchio::{
-    account_info::AccountInfo, entrypoint::ProgramResult, program_error::ProgramError,
-    pubkey::Pubkey, sysvars::clock::Clock,
+    account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, sysvars::clock::Clock,
+    ProgramResult,
 };
 
 // Imports from crate
 use crate::{
-    helpers::{collect_signers, MAXIMUM_SIGNERS},
+    helpers::{bytes_to_u64, collect_signers, MAXIMUM_SIGNERS},
     id,
-    state::{
-        accounts::{Authorized, Lockup, Stake, StakeAuthorize},
-        stake_state_v2::StakeStateV2,
-        state::Meta,
-    },
+    state::stake_state_v2::StakeStateV2,
 };
 
 pub fn process_deactivate(accounts: &[AccountInfo]) -> ProgramResult {
@@ -87,12 +83,12 @@ pub fn process_deactivate(accounts: &[AccountInfo]) -> ProgramResult {
             }
 
             // Check if already deactivated
-            if stake.delegation.deactivation_epoch != u64::MAX {
+            if bytes_to_u64(stake.delegation.deactivation_epoch) != u64::MAX {
                 return Err(ProgramError::Custom(4)); // Custom error for AlreadyDeactivated
             }
 
             // Set deactivation epoch
-            stake.delegation.deactivation_epoch = clock.epoch;
+            stake.delegation.deactivation_epoch = clock.epoch.to_le_bytes();
         }
         _ => return Err(ProgramError::InvalidAccountData),
     }

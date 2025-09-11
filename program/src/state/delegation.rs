@@ -47,6 +47,10 @@ impl Delegation {
         bytes_to_u64(self.activation_epoch) == u64::MAX
     }
 
+    pub fn is_fully_activated(&self, current_epoch: u64) -> bool {
+        current_epoch >= bytes_to_u64(self.activation_epoch)
+    }
+
     pub fn stake<T: StakeHistoryGetEntry>(
         &self,
         epoch: Epoch,

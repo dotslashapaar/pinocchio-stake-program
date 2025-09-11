@@ -59,7 +59,7 @@ pub fn process_authorize_checked_with_seed(
     // Derive the expected old authority key from seed
     let seed = core::str::from_utf8(authorize_data.authority_seed)
         .map_err(|_| ProgramError::InvalidInstructionData)?;
-    let derived_key = Pubkey::create_with_seed(
+    let derived_key = crate::helpers::utils::create_with_seed(
         old_authority_base.key(),
         seed,
         &authorize_data.authority_owner,
