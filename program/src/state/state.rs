@@ -1,17 +1,14 @@
 use crate::helpers::{bytes_to_u64, Epoch};
 use crate::state::accounts::Authorized;
 use pinocchio::{
-    account_info::AccountInfo,
-    program_error::ProgramError,
-    pubkey::Pubkey,
-    sysvars::clock::{Epoch, UnixTimestamp},
+    account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, sysvars::clock::Clock,
 };
 #[repr(C)]
 #[derive(Default, Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Lockup {
     /// UnixTimestamp at which this stake will allow withdrawal, unless the
     ///   transaction is signed by the custodian
-    pub unix_timestamp: UnixTimestamp,
+    pub unix_timestamp: i64,
     /// epoch height at which this stake will allow withdrawal, unless the
     ///   transaction is signed by the custodian
     pub epoch: Epoch,
@@ -72,7 +69,7 @@ impl Lockup {
     /// Create a new lockup
     pub fn new(unix_timestamp: i64, epoch: Epoch, custodian: Pubkey) -> Self {
         Self {
-            unix_timestamp: unix_timestamp.to_le_bytes(),
+            unix_timestamp,
             epoch,
             custodian,
         }
@@ -80,8 +77,7 @@ impl Lockup {
 
     /// Check if the lockup is active for the given timestamp and epoch
     pub fn is_active(&self, current_timestamp: i64, current_epoch: u64) -> bool {
-        current_timestamp < i64::from_le_bytes(self.unix_timestamp)
-            || current_epoch < bytes_to_u64(self.epoch)
+        current_timestamp < self.unix_timestamp || current_epoch < bytes_to_u64(self.epoch)
     }
 
     pub fn get_account_info(account: &AccountInfo) -> Result<&Self, ProgramError> {
@@ -124,8 +120,8 @@ impl Lockup {
         }
 
         // Decode LE-encoded fields
-        let unix_ts = i64::from_le_bytes(self.unix_timestamp); // [u8;8] -> i64
-        let epoch_lo = u64::from_le_bytes(self.epoch); // [u8;8] -> u64
+        let unix_ts = self.unix_timestamp; // already i64
+        let epoch_lo = bytes_to_u64(self.epoch); // [u8;8] -> u64
 
         // Lockup remains in force if *either* constraint hasn't passed yet.
         let time_in_force = unix_ts != 0 && clock.unix_timestamp < unix_ts;

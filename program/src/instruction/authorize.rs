@@ -4,7 +4,7 @@ use pinocchio::{
 };
 
 use crate::{
-    helpers::{collect_signers, MAXIMUM_SIGNERS},
+    helpers::{bytes_to_u64, collect_signers, MAXIMUM_SIGNERS},
     state::{accounts::AuthorizeData, stake_state_v2::StakeStateV2, state::Meta, StakeAuthorize},
 };
 
@@ -132,7 +132,7 @@ fn apply_authorize(
             // Step 1: Check if lockup is active (without considering custodian)
             let lockup_in_force_without_custodian = is_lockup_in_force(
                 meta.lockup.unix_timestamp,
-                meta.lockup.epoch,
+                bytes_to_u64(meta.lockup.epoch),
                 &meta.lockup.custodian,
                 clock,
                 None, // Don't consider any custodian for this check
@@ -154,7 +154,7 @@ fn apply_authorize(
                         // This catches the case where wrong custodian is provided
                         let lockup_still_in_force_with_custodian = is_lockup_in_force(
                             meta.lockup.unix_timestamp,
-                            meta.lockup.epoch,
+                            bytes_to_u64(meta.lockup.epoch),
                             &meta.lockup.custodian,
                             clock,
                             Some(lockup_auth.key()), // Now consider the provided custodian

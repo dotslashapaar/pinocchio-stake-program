@@ -24,7 +24,7 @@ mollusk-svm-bencher = "0.4.0"
 bpf-entrypoint = []
 no-entrypoint = []
 test-default = ["no-entrypoint"]
-default = []
+default = ["bpf-entrypoint"]
 bench-default = ["no-entrypoint"]
 
 [profile.dev]
