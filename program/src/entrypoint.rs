@@ -2,7 +2,7 @@
 mod entrypoint {
     use crate::instruction::{self, StakeInstruction};
     use pinocchio::{
-        account_info::AccountInfo, default_panic_handler, msg, no_allocator, program_entrypoint,
+        account_info::AccountInfo, default_panic_handler, no_allocator, program_entrypoint,
         program_error::ProgramError, pubkey::Pubkey, ProgramResult,
     };
 
@@ -15,7 +15,7 @@ mod entrypoint {
 
     #[inline(always)]
     fn process_instruction(
-        program_id: &Pubkey,
+        _program_id: &Pubkey,
         accounts: &[AccountInfo],
         instruction_data: &[u8],
     ) -> ProgramResult {
@@ -93,20 +93,13 @@ mod entrypoint {
                 pinocchio::msg!("Instruction: GetMinimumDelegation");
                 todo!()
             }
-            StakeInstruction::DeactivateDelinquent => {
-                pinocchio::msg!("Instruction: DeactivateDelinquent");
-                todo!()
-            }
+
             #[allow(deprecated)]
             StakeInstruction::Redelegate => Err(ProgramError::InvalidInstructionData),
             // NOTE we assume the program is going live after `move_stake_and_move_lamports_ixs` is
             // activated
             StakeInstruction::MoveStake => {
                 pinocchio::msg!("Instruction: MoveStake");
-                todo!()
-            }
-            StakeInstruction::MoveLamports => {
-                pinocchio::msg!("Instruction: MoveLamports");
                 todo!()
             }
         }
