@@ -38,7 +38,7 @@ pub fn process_set_lockup(accounts: &[AccountInfo], instruction_data: &[u8]) -> 
         return Err(ProgramError::InvalidSeeds);
     }
 
-    let stake_meta = Meta::get_account_info_mut(stake_account)?;
+    let _stake_meta = Meta::get_account_info_mut(stake_account)?;
 
     let lockup_params = SetLockupData::instruction_data(instruction_data);
 
@@ -136,8 +136,7 @@ fn update_existing_lockup(
     }
 
     if let Some(new_epoch) = lockup_params.epoch {
-        let existing_epoch = bytes_to_u64(existing_lockup.epoch);
-        if new_epoch >= existing_epoch {
+        if new_epoch >= bytes_to_u64(existing_lockup.epoch) {
             existing_lockup.epoch = new_epoch.to_le_bytes();
         }
     }

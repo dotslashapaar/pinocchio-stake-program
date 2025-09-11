@@ -28,7 +28,7 @@ pub fn process_authorized_with_seeds(
         return Err(ProgramError::MissingRequiredSignature);
     };
 
-    let mut authorized = Authorized::get_account_info_mut(stake_account)?;
+    let authorized = Authorized::get_account_info_mut(stake_account)?;
 
     match authorized_data.stake_authorize {
         StakeAuthorize::Staker => {

@@ -1,6 +1,6 @@
-use crate::instruction::{self, StakeInstruction};
+use crate::instruction::StakeInstruction;
 use pinocchio::{
-    account_info::AccountInfo, default_panic_handler, msg, no_allocator, program_entrypoint,
+    account_info::AccountInfo, default_panic_handler, no_allocator, program_entrypoint,
     program_error::ProgramError, pubkey::Pubkey, ProgramResult,
 };
 
@@ -12,12 +12,12 @@ no_allocator!();
 default_panic_handler!();
 
 #[inline(always)]
-fn process_instruction(
-    program_id: &Pubkey,
-    accounts: &[AccountInfo],
+pub fn process_instruction(
+    _program_id: &Pubkey,
+    _accounts: &[AccountInfo],
     instruction_data: &[u8],
 ) -> ProgramResult {
-    let (ix_disc, instruction_data) = instruction_data
+    let (ix_disc, _instruction_data) = instruction_data
         .split_first()
         .ok_or(ProgramError::InvalidInstructionData)?;
 

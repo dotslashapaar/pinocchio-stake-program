@@ -1,10 +1,8 @@
 use pinocchio::program_error::ProgramError;
 
 pub mod initialize;
-pub mod split;
 
 pub use initialize::*;
-pub use split::*;
 
 pub mod process_set_lockup;
 pub use process_set_lockup::*;
@@ -27,6 +25,7 @@ pub use process_redelegate::*;
 
 pub mod deactivate_delinquent;
 pub use deactivate_delinquent::*;
+
 pub mod move_lamports;
 pub use move_lamports::*;
 
@@ -35,6 +34,15 @@ pub use withdraw::*;
 
 pub mod authorize;
 pub use authorize::*;
+
+pub mod split;
+pub use split::*;
+
+pub mod deactivate;
+pub use deactivate::*;
+
+pub mod process_authorize_checked_with_seed;
+pub use process_authorize_checked_with_seed::*;
 
 #[repr(u8)]
 pub enum StakeInstruction {

@@ -1,17 +1,14 @@
 use crate::helpers::{bytes_to_u64, Epoch};
 use crate::state::accounts::Authorized;
 use pinocchio::{
-    account_info::AccountInfo,
-    program_error::ProgramError,
-    pubkey::Pubkey,
-    sysvars::clock::{Epoch, UnixTimestamp},
+    account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, sysvars::clock::Clock,
 };
 #[repr(C)]
 #[derive(Default, Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Lockup {
     /// UnixTimestamp at which this stake will allow withdrawal, unless the
     ///   transaction is signed by the custodian
-    pub unix_timestamp: UnixTimestamp,
+    pub unix_timestamp: [u8; 8], // Store as bytes for consistency
     /// epoch height at which this stake will allow withdrawal, unless the
     ///   transaction is signed by the custodian
     pub epoch: Epoch,
@@ -123,13 +120,11 @@ impl Lockup {
             }
         }
 
-        // Decode LE-encoded fields
-        let unix_ts = i64::from_le_bytes(self.unix_timestamp); // [u8;8] -> i64
-        let epoch_lo = u64::from_le_bytes(self.epoch); // [u8;8] -> u64
-
         // Lockup remains in force if *either* constraint hasn't passed yet.
+        let unix_ts = i64::from_le_bytes(self.unix_timestamp);
+        let epoch_val = bytes_to_u64(self.epoch);
         let time_in_force = unix_ts != 0 && clock.unix_timestamp < unix_ts;
-        let epoch_in_force = epoch_lo != 0 && clock.epoch < epoch_lo;
+        let epoch_in_force = epoch_val != 0 && clock.epoch < epoch_val;
 
         time_in_force || epoch_in_force
     }

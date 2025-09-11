@@ -2,8 +2,12 @@ use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramR
 
 use crate::error::{to_program_error, StakeError};
 use crate::helpers::*;
+use crate::instruction::merge_dedicated::{
+    merge_delegation_stake_and_credits_observed, MergeDelegation, MergeStake,
+};
+use crate::instruction::move_lamports::{move_stake_or_lamports_shared_checks, MergeKind};
 
-use crate::state::{MergeKind, StakeFlags, StakeStateV2};
+use crate::state::{StakeFlags, StakeStateV2};
 
 pub fn relocate_lamports(
     source_account_info: &AccountInfo,
@@ -87,11 +91,28 @@ pub fn move_stake(accounts: &[AccountInfo], lamports: u64) -> ProgramResult {
                 return Err(ProgramError::InvalidArgument);
             }
 
+            // Convert destination_stake to MergeStake
+            let mut merge_stake = MergeStake {
+                delegation: MergeDelegation {
+                    voter_pubkey: destination_stake.delegation.voter_pubkey,
+                    stake: bytes_to_u64(destination_stake.delegation.stake),
+                    activation_epoch: bytes_to_u64(destination_stake.delegation.activation_epoch),
+                    deactivation_epoch: bytes_to_u64(
+                        destination_stake.delegation.deactivation_epoch,
+                    ),
+                },
+                credits_observed: bytes_to_u64(destination_stake.credits_observed),
+            };
+
             merge_delegation_stake_and_credits_observed(
-                &mut destination_stake,
+                &mut merge_stake,
                 lamports,
                 bytes_to_u64(source_stake.credits_observed),
             )?;
+
+            // Convert back to destination_stake
+            destination_stake.delegation.stake = merge_stake.delegation.stake.to_le_bytes();
+            destination_stake.credits_observed = merge_stake.credits_observed.to_le_bytes();
 
             // StakeFlags::empty() is valid here because the only existing stake flag,
             // MUST_FULLY_ACTIVATE_BEFORE_DEACTIVATION_IS_PERMITTED, does not apply to active stakes

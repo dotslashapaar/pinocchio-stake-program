@@ -1,20 +1,19 @@
-
 extern crate alloc;
 use alloc::collections::BTreeSet;
 
+use crate::id;
+use crate::state::delegation::Stake as DelegationStake;
+use crate::state::stake_flag::StakeFlags;
+use crate::state::stake_state_v2::StakeStateV2;
+use crate::state::{Authorized, Meta, StakeAuthorize};
+use pinocchio::ProgramResult;
 use pinocchio::{
     account_info::AccountInfo,
-    sysvars::{clock::Clock, Sysvar},
     msg,
     program_error::ProgramError,
     pubkey::Pubkey,
+    sysvars::{clock::Clock, Sysvar},
 };
-use pinocchio::ProgramResult;
-use crate::state::stake_state_v2::StakeStateV2;
-use crate::state::{Authorized, Meta, StakeAuthorize};
-use crate::state::stake_flag::StakeFlags;
-use crate::state::delegation::Stake as DelegationStake;
-use crate::id;
 // ============== LOCAL DEFINITIONS ==============
 
 #[derive(Clone, Debug)]
@@ -38,10 +37,10 @@ impl MergeKind {
                 let status = stake.delegation.stake_activating_and_deactivating(
                     clock.epoch.to_le_bytes(),
                     stake_history,
-                   crate::helpers::PERPETUAL_NEW_WARMUP_COOLDOWN_RATE_EPOCH,
+                    crate::helpers::PERPETUAL_NEW_WARMUP_COOLDOWN_RATE_EPOCH,
                 );
-                let eff  = u64::from_le_bytes(status.effective);
-                let act  = u64::from_le_bytes(status.activating);
+                let eff = u64::from_le_bytes(status.effective);
+                let act = u64::from_le_bytes(status.activating);
                 let deac = u64::from_le_bytes(status.deactivating);
                 let delegated = u64::from_le_bytes(stake.delegation.stake);
 
@@ -80,8 +79,12 @@ impl MergeKind {
             return Err(ProgramError::InvalidArgument);
         }
         // if either lockup is in force, lockups must be identical
-        let src_in_force = source_meta.lockup.is_active(clock.unix_timestamp, clock.epoch);
-        let dst_in_force = dest_meta.lockup.is_active(clock.unix_timestamp, clock.epoch);
+        let src_in_force = source_meta
+            .lockup
+            .is_active(clock.unix_timestamp, clock.epoch);
+        let dst_in_force = dest_meta
+            .lockup
+            .is_active(clock.unix_timestamp, clock.epoch);
         if src_in_force || dst_in_force {
             if source_meta.lockup != dest_meta.lockup {
                 return Err(ProgramError::InvalidArgument);
@@ -115,7 +118,7 @@ pub fn process_move_lamports(accounts: &[AccountInfo], lamports: u64) -> Program
             // Convert [u8; 8] fields to u64
             let rent_reserve = u64::from_le_bytes(source_meta.rent_exempt_reserve);
             let stake_amount = u64::from_le_bytes(source_stake.delegation.stake);
-            
+
             source_stake_ai
                 .lamports()
                 .saturating_sub(stake_amount)
@@ -136,7 +139,7 @@ pub fn process_move_lamports(accounts: &[AccountInfo], lamports: u64) -> Program
     relocate_lamports(source_stake_ai, destination_stake_ai, lamports)
 }
 
-fn move_stake_or_lamports_shared_checks(
+pub fn move_stake_or_lamports_shared_checks(
     source_stake_ai: &AccountInfo,
     lamports: u64,
     destination_stake_ai: &AccountInfo,
@@ -169,7 +172,7 @@ fn move_stake_or_lamports_shared_checks(
     check_authorized(
         &source_merge_kind.meta().authorized,
         &signers,
-        StakeAuthorize::Staker
+        StakeAuthorize::Staker,
     )?;
 
     let destination_merge_kind = MergeKind::get_if_mergeable(
@@ -197,7 +200,7 @@ fn check_authorized(
         StakeAuthorize::Staker => &authorized.staker,
         StakeAuthorize::Withdrawer => &authorized.withdrawer,
     };
-    
+
     if signers.contains(authorized_pubkey) {
         Ok(())
     } else {
@@ -258,7 +261,7 @@ fn relocate_lamports(
     lamports: u64,
 ) -> ProgramResult {
     let mut from_lamports = source_ai.try_borrow_mut_lamports()?;
-    let mut to_lamports   = destination_ai.try_borrow_mut_lamports()?;
+    let mut to_lamports = destination_ai.try_borrow_mut_lamports()?;
 
     checked_move_lamports(&mut *from_lamports, &mut *to_lamports, lamports)
 }
@@ -269,16 +272,16 @@ mod tests {
     #[test]
     fn checked_move_lamports_ok() {
         let mut from = 1_000u64;
-        let mut to   =   100u64;
+        let mut to = 100u64;
         checked_move_lamports(&mut from, &mut to, 250).unwrap();
         assert_eq!(from, 750);
-        assert_eq!(to,   350);
+        assert_eq!(to, 350);
     }
 
     #[test]
     fn checked_move_lamports_underflow() {
         let mut from = 100u64;
-        let mut to   =  50u64;
+        let mut to = 50u64;
         let err = checked_move_lamports(&mut from, &mut to, 250).unwrap_err();
         assert_eq!(err, ProgramError::InsufficientFunds);
     }
@@ -286,7 +289,7 @@ mod tests {
     #[test]
     fn checked_move_lamports_overflow() {
         let mut from = u64::MAX;
-        let mut to   = u64::MAX - 10;
+        let mut to = u64::MAX - 10;
         let err = checked_move_lamports(&mut from, &mut to, 20).unwrap_err();
         assert_eq!(err, ProgramError::ArithmeticOverflow);
     }

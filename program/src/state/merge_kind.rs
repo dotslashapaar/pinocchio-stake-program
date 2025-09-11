@@ -65,7 +65,7 @@ impl MergeKind {
 
         // Check lockups if active
         if i64::from_le_bytes(stake.lockup.unix_timestamp) > clock.unix_timestamp
-            || stake.lockup.epoch > clock.epoch.to_le_bytes()
+            || bytes_to_u64(stake.lockup.epoch) > clock.epoch
         {
             if stake.lockup.unix_timestamp != source.lockup.unix_timestamp
                 || stake.lockup.epoch != source.lockup.epoch
