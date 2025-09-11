@@ -22,6 +22,7 @@ use crate::ID;
 const FEATURE_STAKE_RAISE_MINIMUM_DELEGATION_TO_1_SOL: bool = false;
 const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
 
+
 // helper for stake amount validation
 pub struct ValidatedDelegatedInfo {
     pub stake_amount: u64,
@@ -344,3 +345,5 @@ pub fn collect_signers_checked<'a>(
 
     Ok((signers, custodian))
 }
+
+   
