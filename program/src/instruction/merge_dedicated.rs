@@ -13,10 +13,7 @@ use crate::{
 };
 
 use pinocchio::{
-    account_info::AccountInfo,
-    program_error::ProgramError,
-    pubkey::Pubkey,
-    sysvars::{clock::Clock, Sysvar},
+    account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, sysvars::clock::Clock,
     ProgramResult,
 };
 
@@ -523,15 +520,15 @@ impl MergeKind {
         }
 
         let dest_locked = is_lockup_in_force(
-            i64::from_le_bytes(dest.lockup.unix_timestamp),
-            u64::from_le_bytes(dest.lockup.epoch),
+            dest.lockup.unix_timestamp,
+            bytes_to_u64(dest.lockup.epoch),
             dest.lockup.custodian,
             clock,
             None,
         );
         let source_locked = is_lockup_in_force(
-            i64::from_le_bytes(source.lockup.unix_timestamp),
-            u64::from_le_bytes(source.lockup.epoch),
+            source.lockup.unix_timestamp,
+            bytes_to_u64(source.lockup.epoch),
             source.lockup.custodian,
             clock,
             None,
@@ -551,7 +548,7 @@ impl MergeKind {
 // ============================================================================
 
 pub fn process_merge(accounts: &[AccountInfo]) -> ProgramResult {
-    let [destination_stake_account_info, source_stake_account_info, clock_info, stake_history_info, ..] =
+    let [destination_stake_account_info, source_stake_account_info, clock_info, _stake_history_info, ..] =
         accounts
     else {
         return Err(ProgramError::NotEnoughAccountKeys);
