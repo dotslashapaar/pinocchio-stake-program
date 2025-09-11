@@ -1,7 +1,7 @@
 extern crate alloc;
-use alloc::collections::BTreeSet;
 use crate::helpers::constant::*;
 use crate::state::stake_history::StakeHistorySysvar;
+use alloc::collections::BTreeSet;
 use pinocchio::{
     account_info::AccountInfo,
     program_error::ProgramError,
@@ -221,10 +221,10 @@ pub fn validate_delegated_amount(
     stake_account_info: &AccountInfo,
     meta: &Meta,
 ) -> Result<ValidatedDelegatedInfo, ProgramError> {
-    let rent_exempt_reserve = u64::from_le_bytes(meta.rent_exempt_reserve);
+    let rent_exempt_reserve = bytes_to_u64(meta.rent_exempt_reserve);
     let stake_amount = stake_account_info
         .lamports()
-        .checked_sub(bytes_to_u64(meta.rent_exempt_reserve))
+        .checked_sub(rent_exempt_reserve)
         .ok_or(StakeError::InsufficientFunds)
         .map_err(to_program_error)?;
 

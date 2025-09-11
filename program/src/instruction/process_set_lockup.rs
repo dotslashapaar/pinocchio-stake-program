@@ -38,7 +38,7 @@ pub fn process_set_lockup(accounts: &[AccountInfo], instruction_data: &[u8]) -> 
         return Err(ProgramError::InvalidSeeds);
     }
 
-    let stake_meta = Meta::get_account_info_mut(stake_account)?;
+    let _stake_meta = Meta::get_account_info_mut(stake_account)?;
 
     let lockup_params = SetLockupData::instruction_data(instruction_data);
 
@@ -101,7 +101,7 @@ fn create_lockup_account(
 
     let lockup_data = Lockup::get_account_info_mut(lockup_account)?;
 
-    lockup_data.unix_timestamp = lockup_params.unix_timestamp.unwrap_or(0).to_le_bytes();
+    lockup_data.unix_timestamp = lockup_params.unix_timestamp.unwrap_or(0);
     lockup_data.epoch = lockup_params.epoch.unwrap_or(0).to_le_bytes();
     lockup_data.custodian = lockup_params.custodian.unwrap_or(Pubkey::default());
 
@@ -130,8 +130,8 @@ fn update_existing_lockup(
     }
 
     if let Some(new_timestamp) = lockup_params.unix_timestamp {
-        if new_timestamp >= i64::from_le_bytes(existing_lockup.unix_timestamp) {
-            existing_lockup.unix_timestamp = new_timestamp.to_le_bytes();
+        if new_timestamp >= existing_lockup.unix_timestamp {
+            existing_lockup.unix_timestamp = new_timestamp;
         }
     }
 
