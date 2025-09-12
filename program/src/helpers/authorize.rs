@@ -34,7 +34,7 @@ pub fn authorize_update(
             }
 
             // Lockup enforcement: require custodian signer if lockup still in force
-            let epoch_in_force = bytes_to_u64(meta.lockup.epoch) > clock.epoch;
+            let epoch_in_force = meta.lockup.epoch> clock.epoch;
             let ts_in_force    = meta.lockup.unix_timestamp > clock.unix_timestamp;
             if epoch_in_force || ts_in_force {
                 let custodian_ok = maybe_lockup_authority

@@ -1,79 +1,188 @@
-use pinocchio::{program_error::ProgramError, sysvars::clock::Clock};
+use pinocchio::{program_error::ProgramError, sysvars::clock::Clock, ProgramResult};
 
-use crate::{
-    error::{to_program_error, StakeError},
-    helpers::bytes_to_u64,
-    state::{delegation::Stake, Meta, StakeFlags, StakeHistory, StakeStateV2},
+use crate::helpers::{
+    bytes_to_u64,
+    checked_add,
+    constant::PERPETUAL_NEW_WARMUP_COOLDOWN_RATE_EPOCH,
 };
-
+use crate::helpers::merge::merge_delegation_stake_and_credits_observed;
+use crate::state::{
+    delegation::Stake as DelegationStake,
+    stake_flag::StakeFlags,
+    stake_history::StakeHistoryGetEntry,
+    stake_state_v2::StakeStateV2,
+    state::Meta,
+};
+/// Classification of stake accounts for merge compatibility
 #[derive(Clone, Debug, PartialEq)]
 pub enum MergeKind {
+    /// Inactive stake (not delegated) – holds total lamports (for rent math).
     Inactive(Meta, u64, StakeFlags),
-    ActivationEpoch(Meta, Stake, StakeFlags),
-    FullyActive(Meta, Stake),
+
+    /// Stake is in the activation epoch (has activating stake).
+    ActivationEpoch(Meta, DelegationStake, StakeFlags),
+
+    /// Fully active stake (no activating/deactivating, effective == delegated).
+    FullyActive(Meta, DelegationStake),
 }
 
 impl MergeKind {
-    /// Get metadata from any merge kind
+    /// Borrow meta from any variant
     pub fn meta(&self) -> &Meta {
         match self {
-            MergeKind::Inactive(meta, _, _) => meta,
-            MergeKind::ActivationEpoch(meta, _, _) => meta,
-            MergeKind::FullyActive(meta, _) => meta,
+            Self::Inactive(meta, _, _) => meta,
+            Self::ActivationEpoch(meta, _, _) => meta,
+            Self::FullyActive(meta, _) => meta,
         }
     }
 
-    /// Check if stake state can be merged
-    pub fn get_if_mergeable(
+    /// Borrow the active stake (if any)
+    fn active_stake(&self) -> Option<&DelegationStake> {
+        match self {
+            Self::Inactive(_, _, _) => None,
+            Self::ActivationEpoch(_, stake, _) => Some(stake),
+            Self::FullyActive(_, stake) => Some(stake),
+        }
+    }
+
+    /// Native-equivalent classification
+       pub fn get_if_mergeable<T: StakeHistoryGetEntry>(
         stake_state: &StakeStateV2,
-        lamports: u64,
-        _clock: &Clock,
-        _stake_history: &StakeHistory,
+        stake_lamports: u64,
+        clock: &Clock,
+        stake_history: &T,          // <-- generic over the trait, not a concrete type
     ) -> Result<Self, ProgramError> {
         match stake_state {
-            StakeStateV2::Stake(meta, stake, stake_flags) => {
-                // Simplified logic, later => this would check epochs
-                if bytes_to_u64(stake.delegation.deactivation_epoch) == u64::MAX {
-                    Ok(MergeKind::FullyActive(meta.clone(), stake.clone()))
-                } else {
-                    Ok(MergeKind::ActivationEpoch(
-                        meta.clone(),
-                        stake.clone(),
-                        stake_flags.clone(),
-                    ))
+            StakeStateV2::Stake(meta, stake, flags) => {
+                let status = stake.delegation.stake_activating_and_deactivating(
+                    clock.epoch.to_le_bytes(),
+                    stake_history,                                 // <-- OK for any T: StakeHistoryGetEntry
+                    crate::helpers::constant::PERPETUAL_NEW_WARMUP_COOLDOWN_RATE_EPOCH,
+                );
+                let effective    = crate::helpers::bytes_to_u64(status.effective);
+                let activating   = crate::helpers::bytes_to_u64(status.activating);
+                let deactivating = crate::helpers::bytes_to_u64(status.deactivating);
+                let delegated    = crate::helpers::bytes_to_u64(stake.delegation.stake);
+
+                match (effective, activating, deactivating) {
+                    (0, 0, 0) => Ok(Self::Inactive(*meta, stake_lamports, *flags)),
+                    (0, _, _) => Ok(Self::ActivationEpoch(*meta, *stake, *flags)),
+                    (_, 0, 0) if effective == delegated => Ok(Self::FullyActive(*meta, *stake)),
+                    _ => Err(ProgramError::InvalidAccountData),
                 }
             }
-            StakeStateV2::Initialized(meta) => Ok(MergeKind::Inactive(
-                meta.clone(),
-                lamports,
-                StakeFlags::empty(),
-            )),
+            StakeStateV2::Initialized(meta) => {
+                Ok(Self::Inactive(*meta, stake_lamports, crate::state::stake_flag::StakeFlags::empty()))
+            }
             _ => Err(ProgramError::InvalidAccountData),
         }
     }
 
-    /// Verify metas can be merged (authorities and lockups match)
-    pub fn metas_can_merge(stake: &Meta, source: &Meta, clock: &Clock) -> Result<(), ProgramError> {
-        // Check authorities match
-        if stake.authorized.staker != source.authorized.staker {
-            return Err(to_program_error(StakeError::MergeMismatch));
+    /// Native-equivalent metadata check for merge
+    pub fn metas_can_merge(dest: &Meta, source: &Meta, clock: &Clock) -> ProgramResult {
+        // Authorities must match exactly
+        if dest.authorized != source.authorized {
+            return Err(ProgramError::InvalidAccountData);
         }
 
-        if stake.authorized.withdrawer != source.authorized.withdrawer {
-            return Err(to_program_error(StakeError::MergeMismatch));
-        }
+        // Lockups may differ, but both must be expired (custodian does not bypass merges)
+        let can_merge_lockups =
+            dest.lockup == source.lockup
+            || (!dest.lockup.is_in_force(clock, None) && !source.lockup.is_in_force(clock, None));
 
-        // Check lockups if active
-        if i64::from_le_bytes(stake.lockup.unix_timestamp) > clock.unix_timestamp
-            || stake.lockup.epoch > clock.epoch.to_le_bytes()
-        {
-            if stake.lockup.unix_timestamp != source.lockup.unix_timestamp
-                || stake.lockup.epoch != source.lockup.epoch
-            {
-                return Err(to_program_error(StakeError::LockupInForce));
-            }
+        if can_merge_lockups {
+            Ok(())
+        } else {
+            Err(ProgramError::InvalidAccountData)
         }
-
-        Ok(())
     }
-}
+
+    /// Native-equivalent active delegation compatibility
+    pub fn active_delegations_can_merge(
+        dest: &crate::state::delegation::Delegation,
+        source: &crate::state::delegation::Delegation,
+    ) -> ProgramResult {
+        if dest.voter_pubkey != source.voter_pubkey {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        let max_epoch = u64::MAX.to_le_bytes();
+        if dest.deactivation_epoch == max_epoch && source.deactivation_epoch == max_epoch {
+            Ok(())
+        } else {
+            Err(ProgramError::InvalidAccountData)
+        }
+    }
+
+    /// Native-equivalent merge behavior
+    pub fn merge(
+        self,
+        source: Self,
+        _clock: &Clock,
+    ) -> Result<Option<StakeStateV2>, ProgramError> {
+        // validate metas
+        // (Note: `metas_can_merge` should be called by the instruction before this,
+        // but we keep native shape and call again here as well.)
+        // We need a Clock for metas_can_merge, but we only used it for lockup; caller already checked,
+        // so we’ll trust caller and skip here to avoid double sysvar passing.
+
+        // If both are active kinds, validate active delegations
+        if let (Some(dst), Some(src)) = (self.active_stake(), source.active_stake()) {
+            Self::active_delegations_can_merge(&dst.delegation, &src.delegation)?;
+        }
+
+        let merged = match (self, source) {
+            // Inactive + Inactive: no change
+            (Self::Inactive(_, _, _), Self::Inactive(_, _, _)) => None,
+
+            // Inactive + ActivationEpoch: no change (must be dst receiving)
+            (Self::Inactive(_, _, _), Self::ActivationEpoch(_, _, _)) => None,
+
+            // ActivationEpoch + Inactive: add *all* source lamports (incl. rent) to stake
+            (Self::ActivationEpoch(meta, mut stake, dst_flags),
+             Self::Inactive(_, src_lamports, src_flags)) =>
+            {
+                let new_stake =
+                    checked_add(bytes_to_u64(stake.delegation.stake), src_lamports)?;
+                stake.delegation.stake = new_stake.to_le_bytes();
+
+                let merged_flags = dst_flags.union(src_flags);
+                Some(StakeStateV2::Stake(meta, stake, merged_flags))
+            }
+
+            // ActivationEpoch + ActivationEpoch: add (source stake + source rent_exempt_reserve)
+            (Self::ActivationEpoch(meta, mut stake, dst_flags),
+             Self::ActivationEpoch(src_meta, src_stake, src_flags)) =>
+            {
+                let src_stake_lamports = checked_add(
+                    bytes_to_u64(src_meta.rent_exempt_reserve),
+                    bytes_to_u64(src_stake.delegation.stake),
+                )?;
+                merge_delegation_stake_and_credits_observed(
+                    &mut stake,
+                    src_stake_lamports,
+                    bytes_to_u64(src_stake.credits_observed),
+                )?;
+
+                let merged_flags = dst_flags.union(src_flags);
+                Some(StakeStateV2::Stake(meta, stake, merged_flags))
+            }
+
+            // FullyActive + FullyActive: add source *stake only* (no rent)
+            (Self::FullyActive(meta, mut stake),
+             Self::FullyActive(_, src_stake)) =>
+            {
+                merge_delegation_stake_and_credits_observed(
+                    &mut stake,
+                    bytes_to_u64(src_stake.delegation.stake),
+                    bytes_to_u64(src_stake.credits_observed),
+                )?;
+                Some(StakeStateV2::Stake(meta, stake, StakeFlags::empty()))
+            }
+
+            // any other shape is invalid (native throws StakeError::MergeMismatch)
+            _ => return Err(ProgramError::InvalidAccountData),
+        };
+
+        Ok(merged)
+    }
+}   

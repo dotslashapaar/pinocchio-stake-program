@@ -45,6 +45,9 @@ pub use withdraw::*;
 pub mod deactivate;
 pub use deactivate::*;
 
+pub mod process_set_lockup_checked;
+pub use process_set_lockup_checked::*;
+
 #[repr(u8)]
 pub enum StakeInstruction {
     Initialize,

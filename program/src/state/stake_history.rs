@@ -92,7 +92,10 @@ impl StakeHistory {
             len: 0,
         }
     }
-
+    #[inline]
+    pub fn from_account_data(_data: &[u8], _current_epoch: u64) -> Self {
+        Self::new()
+    }
     pub fn push(&mut self, entry: StakeHistoryEntry) -> Result<(), &'static str> {
         if self.len >= MAX_STAKE_HISTORY_ENTRIES {
             return Err("StakeHistory is full");

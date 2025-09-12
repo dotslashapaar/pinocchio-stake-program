@@ -85,7 +85,7 @@ fn process_instruction(
 
         // Parse into typed struct
         let args = AuthorizeCheckedWithSeedData::parse(instruction_data)?;
-
+        let lamports = u64::from_le_bytes(instruction_data.try_into().unwrap());
         // Typed handler (native-style)
         // fn process_authorize_checked_with_seed(accounts: &[AccountInfo], args: AuthorizeCheckedWithSeedData) -> ProgramResult
         instruction::process_authorize_checked_with_seed::process_authorize_checked_with_seed(accounts, args)
@@ -97,6 +97,7 @@ fn process_instruction(
         StakeInstruction::Split => {
             pinocchio::msg!("Instruction: Split");
             todo!()
+            //instruction::split::process_split()
         }
         StakeInstruction::Withdraw => {
             pinocchio::msg!("Instruction: Withdraw");
@@ -109,7 +110,7 @@ fn process_instruction(
         }
         StakeInstruction::SetLockup => {
             pinocchio::msg!("Instruction: SetLockup");
-            todo!()
+            instruction::process_set_lockup::process_set_lockup(accounts, instruction_data)
         }
         StakeInstruction::Merge => {
             pinocchio::msg!("Instruction: Merge");
@@ -139,7 +140,8 @@ fn process_instruction(
         // activated
         StakeInstruction::MoveStake => {
             pinocchio::msg!("Instruction: MoveStake");
-            todo!()
+            let lamports = u64::from_le_bytes(instruction_data.try_into().unwrap());
+            instruction::move_stake(accounts, lamports)
         }
         StakeInstruction::MoveLamports => {
             pinocchio::msg!("Instruction: MoveLamports");
