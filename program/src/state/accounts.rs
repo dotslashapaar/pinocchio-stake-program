@@ -3,7 +3,7 @@ use crate::{error::StakeError, state::Lockup};
 use core::mem::size_of;
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
 
-// use crate::helpers::*; // Currently unused
+use crate::helpers::*;
 
 // Constants for fixed-size arrays
 pub const MAX_AUTHORITY_SEED_LEN: usize = 32;

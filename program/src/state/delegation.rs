@@ -223,7 +223,7 @@ impl Delegation {
                 }
                 if let Some(current_cluster_stake) = history.get_entry(current_epoch) {
                     prev_epoch = current_epoch.to_le_bytes();
-                    prev_cluster_stake = current_cluster_stake;
+                    prev_cluster_stake = (current_cluster_stake);
                 } else {
                     break;
                 }

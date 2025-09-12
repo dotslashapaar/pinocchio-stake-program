@@ -1,4 +1,6 @@
-use crate::state::delegation::Delegation;
+use crate::{
+    error::*, helpers::*, state::delegation::Delegation, state::stake_history::StakeHistoryGetEntry,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 #[repr(C)]

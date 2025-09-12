@@ -6,7 +6,7 @@ use pinocchio::{
 
 use crate::{
     helpers::{bytes_to_u64, checked_add, get_stake_state},
-    state::{delegation::Stake, MergeKind, StakeHistory},
+    state::{delegation::Stake, MergeKind, StakeHistorySysvar},
 };
 
 pub fn stake_weighted_credits_observed(
@@ -23,8 +23,7 @@ pub fn stake_weighted_credits_observed(
             .checked_mul(u128::from(bytes_to_u64(stake.delegation.stake)))?;
         let absorbed_weighted_credits =
             u128::from(absorbed_credits_observed).checked_mul(u128::from(absorbed_lamports))?;
-        // Discard fractional credits as a merge side-effect friction by taking
-        // the ceiling, done by adding `denominator - 1` to the numerator.
+        // ceiling: +denominator-1 before division
         let total_weighted_credits = stake_weighted_credits
             .checked_add(absorbed_weighted_credits)?
             .checked_add(total_stake)?
@@ -44,7 +43,6 @@ pub fn merge_delegation_stake_and_credits_observed(
         stake_weighted_credits_observed(stake, lamports_to_merge, source_credits_observed)
             .ok_or(ProgramError::ArithmeticOverflow)?
             .to_le_bytes();
-
     Ok(())
 }
 
@@ -75,16 +73,15 @@ pub fn move_stake_or_lamports_shared_checks(
     }
 
     let clock = Clock::get()?;
-    let stake_history = StakeHistory::new();
+    let stake_history = StakeHistorySysvar(clock.epoch);
 
-    // Get if mergeable ensures accounts are not partly activated or in any form of deactivating
+    // Ensure neither account is transient and both are mergeable
     let source_merge_kind = MergeKind::get_if_mergeable(
         &get_stake_state(source_stake_account_info)?,
         source_stake_account_info.lamports(),
         &clock,
         &stake_history,
     )?;
-
     let destination_merge_kind = MergeKind::get_if_mergeable(
         &get_stake_state(destination_stake_account_info)?,
         destination_stake_account_info.lamports(),
@@ -92,7 +89,7 @@ pub fn move_stake_or_lamports_shared_checks(
         &stake_history,
     )?;
 
-    // Ensure all authorities match and lockups match if lockup is in force
+    // Ensure metas are compatible per native logic (auth/lockups)
     MergeKind::metas_can_merge(
         source_merge_kind.meta(),
         destination_merge_kind.meta(),
