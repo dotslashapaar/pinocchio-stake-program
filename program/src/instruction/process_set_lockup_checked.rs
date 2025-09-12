@@ -14,7 +14,7 @@ use crate::{
 };
 
 
-struct LockupCheckedData {
+pub struct LockupCheckedData {
     pub unix_timestamp: Option<i64>,
     pub epoch: Option<u64>,
 }

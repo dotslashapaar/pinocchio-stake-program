@@ -12,7 +12,8 @@ pub enum StakeError {
     MergeMismatch,
     LockupInForce,
     InsufficientReferenceVotes,
-    MinimumDelinquentEpochsForDeactivationNotMet
+    MinimumDelinquentEpochsForDeactivationNotMet,
+    TooSoonToRedelegate
 }
 
 // map internal errors to standard program error
@@ -28,5 +29,6 @@ pub fn to_program_error(err: StakeError) -> ProgramError {
         StakeError::LockupInForce => ProgramError::Custom(0x15),
         StakeError::InsufficientReferenceVotes=> ProgramError::Custom(0x16),
         StakeError::MinimumDelinquentEpochsForDeactivationNotMet=> ProgramError::Custom(0x17),
+        StakeError::TooSoonToRedelegate=> ProgramError::Custom(0x18),
     }
 }

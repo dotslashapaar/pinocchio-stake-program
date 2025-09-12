@@ -246,21 +246,43 @@ pub fn new_stake(
 }
 
 // modify existing stake object with updated delegation
+// utils.rs (only this function shown)
 pub fn redelegate_stake(
     stake: &mut Stake,
-    stake_amount: u64,
-    vote_pubkey: &Pubkey,
+    stake_lamports: u64,
+    voter_pubkey: &Pubkey,
     vote_state: &VoteState,
-    clock_epoch: u64,
-    _stake_history: &StakeHistorySysvar,
+    epoch: u64,
+    stake_history: &StakeHistorySysvar,
 ) -> Result<(), ProgramError> {
-    stake.delegation.voter_pubkey = *vote_pubkey;
-    stake.delegation.set_stake_amount(stake_amount);
-    stake.delegation.activation_epoch = clock_epoch.to_le_bytes();
+    // Effective stake at `epoch`?
+    let effective = stake.stake(
+        epoch.to_le_bytes(),
+        stake_history,
+        PERPETUAL_NEW_WARMUP_COOLDOWN_RATE_EPOCH,
+    );
+
+    if effective != 0 {
+        // If same voter AND we were scheduled to deactivate this epoch, rescind deactivation
+        if stake.delegation.voter_pubkey == *voter_pubkey
+            && bytes_to_u64(stake.delegation.deactivation_epoch) == epoch
+        {
+            stake.delegation.deactivation_epoch = u64::MAX.to_le_bytes();
+            return Ok(());
+        } else {
+            // Can't redelegate when still effective
+            return Err(to_program_error(StakeError::TooSoonToRedelegate));
+        }
+    }
+
+    // Not currently effective: proceed with redelegation (re-activation / un-deactivation)
+    stake.delegation.stake = stake_lamports.to_le_bytes();
+    stake.delegation.activation_epoch = epoch.to_le_bytes();
+    stake.delegation.deactivation_epoch = u64::MAX.to_le_bytes();
+    stake.delegation.voter_pubkey = *voter_pubkey;
     stake.set_credits_observed(vote_state.credits());
     Ok(())
 }
-
 // dont call this "move" because we have an instruction MoveLamports
 pub fn relocate_lamports(
     source_account_info: &AccountInfo,
