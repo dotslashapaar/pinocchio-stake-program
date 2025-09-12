@@ -10,21 +10,25 @@ use pinocchio::{
     ProgramResult,
 };
 
-use crate::helpers::constant::MINIMUM_DELINQUENT_EPOCHS_FOR_DEACTIVATION;
 use crate::{
     error::{to_program_error, StakeError},
     helpers::{get_stake_state, next_account_info, set_stake_state},
-    state::{stake_state_v2::StakeStateV2, vote_state::vote_program_id},
+    id,
+    state::{
+        stake_state_v2::StakeStateV2,
+        vote_state::vote_program_id,
+    },
 };
+use crate::helpers::constant::MINIMUM_DELINQUENT_EPOCHS_FOR_DEACTIVATION;
 
 pub fn process_deactivate_delinquent(accounts: &[AccountInfo]) -> ProgramResult {
     msg!("Instruction: DeactivateDelinquent");
 
     // --- Accounts: stake, delinquent_vote, reference_vote ---
     let iter = &mut accounts.iter();
-    let stake_ai = next_account_info(iter)?;
+    let stake_ai           = next_account_info(iter)?;
     let delinquent_vote_ai = next_account_info(iter)?;
-    let reference_vote_ai = next_account_info(iter)?;
+    let reference_vote_ai  = next_account_info(iter)?;
 
     // --- Clock (native uses the current epoch) ---
     let clock = Clock::get()?;
@@ -55,27 +59,23 @@ pub fn process_deactivate_delinquent(accounts: &[AccountInfo]) -> ProgramResult 
         let data = delinquent_vote_ai.try_borrow_data()?;
         match last_vote_epoch_bytes(&data)? {
             None => true, // never voted => eligible
-            Some(last_epoch) => match clock
-                .epoch
-                .checked_sub(MINIMUM_DELINQUENT_EPOCHS_FOR_DEACTIVATION)
-            {
+            Some(last_epoch) => match clock.epoch.checked_sub(MINIMUM_DELINQUENT_EPOCHS_FOR_DEACTIVATION) {
                 Some(min_epoch) => last_epoch <= min_epoch,
                 None => false,
-            },
+            }
         }
     };
 
     // --- 3) Load stake state, verify delegation target, deactivate if eligible ---
     match get_stake_state(stake_ai)? {
-        StakeStateV2::Stake(meta, mut stake, flags) => {
+        StakeStateV2::Stake(mut meta, mut stake, flags) => {
             if stake.delegation.voter_pubkey != *delinquent_vote_ai.key() {
                 return Err(to_program_error(StakeError::VoteAddressMismatch));
             }
 
             if delinquent_is_eligible {
                 // native sets deactivation_epoch = current epoch
-                stake
-                    .deactivate(clock.epoch.to_le_bytes())
+                stake.deactivate(clock.epoch.to_le_bytes())
                     .map_err(to_program_error)?;
                 set_stake_state(stake_ai, &StakeStateV2::Stake(meta, stake, flags))
             } else {
@@ -87,6 +87,7 @@ pub fn process_deactivate_delinquent(accounts: &[AccountInfo]) -> ProgramResult 
         _ => Err(ProgramError::InvalidAccountData),
     }
 }
+
 
 fn acceptable_reference_epoch_credits_bytes(
     data: &[u8],
@@ -161,55 +162,55 @@ mod tests {
         out
     }
 
-    #[test]
-    fn reference_has_all_last_n_epochs() {
-        // current = 100, need epochs 100..=96 present
-        let current = 100;
-        let bytes = build_epoch_credits_bytes(&[
-            (96, 1, 0),
-            (97, 2, 1),
-            (98, 3, 2),
-            (99, 4, 3),
-            (100, 5, 4),
-        ]);
-        assert!(acceptable_reference_epoch_credits_bytes(&bytes, current, 5).unwrap());
-    }
+   #[test]
+fn reference_has_all_last_n_epochs() {
+    // current = 100, need epochs 100..=96 present
+    let current = 100;
+    let bytes = build_epoch_credits_bytes(&[
+        (96, 1, 0),
+        (97, 2, 1),
+        (98, 3, 2),
+        (99, 4, 3),
+        (100, 5, 4),
+    ]);
+    assert!(acceptable_reference_epoch_credits_bytes(&bytes, current, 5).unwrap());
+}
 
-    #[test]
-    fn reference_missing_one_epoch_fails() {
-        // Missing 98 in the last 5 => should fail
-        let current = 100;
-        let bytes = build_epoch_credits_bytes(&[
-            (96, 1, 0),
-            (97, 2, 1),
-            //(98 missing)
-            (99, 4, 3),
-            (100, 5, 4),
-        ]);
-        assert!(!acceptable_reference_epoch_credits_bytes(&bytes, current, 5).unwrap());
-    }
+#[test]
+fn reference_missing_one_epoch_fails() {
+    // Missing 98 in the last 5 => should fail
+    let current = 100;
+    let bytes = build_epoch_credits_bytes(&[
+        (96, 1, 0),
+        (97, 2, 1),
+        //(98 missing)
+        (99, 4, 3),
+        (100, 5, 4),
+    ]);
+    assert!(!acceptable_reference_epoch_credits_bytes(&bytes, current, 5).unwrap());
+}
 
-    #[test]
-    fn delinquent_if_last_vote_older_than_n() {
-        // current=100, N=5 => min_epoch = 95
-        // last=94 => 94 <= 95 => eligible (delinquent)
-        let current = 100;
-        let bytes = build_epoch_credits_bytes(&[(94, 5, 0)]);
-        let last = last_vote_epoch_bytes(&bytes).unwrap();
-        assert_eq!(last, Some(94));
-        let min_epoch = current - 5;
-        assert!(last.unwrap() <= min_epoch);
-    }
+#[test]
+fn delinquent_if_last_vote_older_than_n() {
+    // current=100, N=5 => min_epoch = 95
+    // last=94 => 94 <= 95 => eligible (delinquent)
+    let current = 100;
+    let bytes = build_epoch_credits_bytes(&[(94, 5, 0)]);
+    let last = last_vote_epoch_bytes(&bytes).unwrap();
+    assert_eq!(last, Some(94));
+    let min_epoch = current - 5;
+    assert!(last.unwrap() <= min_epoch);
+}
 
-    #[test]
-    fn not_delinquent_if_last_vote_within_n() {
-        // current=100, N=5 => min_epoch=95
-        // last=97 => 97 > 95 => NOT delinquent
-        let current = 100;
-        let bytes = build_epoch_credits_bytes(&[(97, 5, 0)]);
-        let last = last_vote_epoch_bytes(&bytes).unwrap();
-        assert_eq!(last, Some(97));
-        let min_epoch = current - 5;
-        assert!(!(last.unwrap() <= min_epoch));
-    }
+#[test]
+fn not_delinquent_if_last_vote_within_n() {
+    // current=100, N=5 => min_epoch=95
+    // last=97 => 97 > 95 => NOT delinquent
+    let current = 100;
+    let bytes = build_epoch_credits_bytes(&[(97, 5, 0)]);
+    let last = last_vote_epoch_bytes(&bytes).unwrap();
+    assert_eq!(last, Some(97));
+    let min_epoch = current - 5;
+    assert!(!(last.unwrap() <= min_epoch));
+}
 }
