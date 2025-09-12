@@ -10,7 +10,7 @@ use pinocchio::{
     ProgramResult,
 };
 
-fn process_split(accounts: &[AccountInfo], split_lamports: u64) -> ProgramResult {
+pub fn process_split(accounts: &[AccountInfo], split_lamports: u64) -> ProgramResult {
     let mut arr_of_signers = [Pubkey::default(); MAXIMUM_SIGNERS];
     let _ = collect_signers(accounts, &mut arr_of_signers)?;
 

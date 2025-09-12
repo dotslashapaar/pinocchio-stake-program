@@ -1,60 +1,54 @@
 use pinocchio::{
-    account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, sysvars::clock::Clock,
+    account_info::AccountInfo,
+    program_error::ProgramError,
+    pubkey::Pubkey,
+    sysvars::clock::Clock,
     ProgramResult,
 };
 
 use crate::{
     error::to_program_error,
-    helpers::*,
+    helpers::{collect_signers, next_account_info},
+    helpers::utils::{
+        get_stake_state, get_vote_state, new_stake, redelegate_stake, set_stake_state,
+        validate_delegated_amount, ValidatedDelegatedInfo,
+    },
+    helpers::constant::MAXIMUM_SIGNERS,
     state::{StakeAuthorize, StakeFlags, StakeHistorySysvar, StakeStateV2},
 };
 
+/// Native-equivalent of Delegate (works for initial delegation and redelegation)
 pub fn redelegate(accounts: &[AccountInfo]) -> ProgramResult {
-    // Check for enough accounts
-    if accounts.len() < 5 {
-        return Err(ProgramError::NotEnoughAccountKeys);
-    }
+    // Collect signers (native behavior: accumulate all signers from the full account list)
+    let mut signers_buf = [Pubkey::default(); MAXIMUM_SIGNERS];
+    let n = collect_signers(accounts, &mut signers_buf)?;
+    let signers = &signers_buf[..n];
 
-    // Collect all signer pubkeys for authorization checks
-    let mut signers_array = [Pubkey::default(); MAXIMUM_SIGNERS];
-    let signers_count = collect_signers(accounts, &mut signers_array)?;
-    let signers = &signers_array[..signers_count];
+    // native asserts: 5 accounts (2 sysvars + stake config)
+    let account_info_iter = &mut accounts.iter();
+    let stake_account_info = next_account_info(account_info_iter)?;
+    let vote_account_info  = next_account_info(account_info_iter)?;
+    let clock_info         = next_account_info(account_info_iter)?;
+    let _stake_history     = next_account_info(account_info_iter)?; // present but not read directly
+    let _stake_config      = next_account_info(account_info_iter)?; // present but not read directly
 
-    // Get the required accounts
-    let stake_account_info = &accounts[0];
-    let vote_account_info = &accounts[1];
-    let clock_info = &accounts[2];
-    // We access accounts[3] and accounts[4] but don't use them directly
-    // They're provided for compatibility with the Solana stake program interface
+    let clock = &Clock::from_account_info(clock_info)?;
+    let stake_history = StakeHistorySysvar(clock.epoch); // <-- epoch, not slot
 
-    // Make sure accounts are valid
-    if !stake_account_info.is_writable() {
-        return Err(ProgramError::InvalidAccountData);
-    }
-
-    // Get clock and stake history
-    let clock = Clock::from_account_info(clock_info)?;
-    let stake_history = StakeHistorySysvar(clock.slot);
-
-    // Get vote state from the vote account
     let vote_state = get_vote_state(vote_account_info)?;
 
-    // Get current state of the stake account
-    let stake_state = StakeStateV2::deserialize(&stake_account_info.try_borrow_data()?)?;
-
-    // Process based on current stake state
-    match stake_state {
+    match get_stake_state(stake_account_info)? {
         StakeStateV2::Initialized(meta) => {
-            // Verify authorization
+            // staker must sign
             meta.authorized
-                .check(&signers, StakeAuthorize::Staker)
+                .check(signers, StakeAuthorize::Staker)
                 .map_err(to_program_error)?;
 
-            // Validate delegation amount
+            // how much can be delegated (lamports - rent)
             let ValidatedDelegatedInfo { stake_amount } =
                 validate_delegated_amount(stake_account_info, &meta)?;
 
-            // Create new stake with delegation to the vote account
+            // create stake delegated to the vote account
             let stake = new_stake(
                 stake_amount,
                 vote_account_info.key(),
@@ -62,30 +56,21 @@ pub fn redelegate(accounts: &[AccountInfo]) -> ProgramResult {
                 clock.epoch,
             );
 
-            // Update stake state with new delegation
             set_stake_state(
                 stake_account_info,
                 &StakeStateV2::Stake(meta, stake, StakeFlags::empty()),
             )?;
-
-            // Successfully delegated stake
         }
         StakeStateV2::Stake(meta, mut stake, flags) => {
-            // Verify authorization
+            // staker must sign
             meta.authorized
-                .check(&signers, StakeAuthorize::Staker)
+                .check(signers, StakeAuthorize::Staker)
                 .map_err(to_program_error)?;
 
-            // Validate redelegation amount
             let ValidatedDelegatedInfo { stake_amount } =
                 validate_delegated_amount(stake_account_info, &meta)?;
 
-            // If already delegated to the same vote account, this is a no-op
-            if stake.delegation.voter_pubkey == *vote_account_info.key() {
-                return Ok(());
-            }
-
-            // Redelegate to the new vote account
+            // Delegate helper enforces the active-stake rules & rescind-on-same-voter case.
             redelegate_stake(
                 &mut stake,
                 stake_amount,
@@ -95,10 +80,7 @@ pub fn redelegate(accounts: &[AccountInfo]) -> ProgramResult {
                 &stake_history,
             )?;
 
-            // Update stake state with new delegation
             set_stake_state(stake_account_info, &StakeStateV2::Stake(meta, stake, flags))?;
-
-            // Successfully redelegated stake
         }
         _ => return Err(ProgramError::InvalidAccountData),
     }

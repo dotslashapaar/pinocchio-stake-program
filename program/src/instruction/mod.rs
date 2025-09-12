@@ -1,9 +1,12 @@
 use pinocchio::program_error::ProgramError;
 
 pub mod initialize;
-pub mod split;
-
 pub use initialize::*;
+
+pub mod initialize_checked;
+pub use initialize_checked::*;
+
+pub mod split;
 pub use split::*;
 
 pub mod process_set_lockup;
