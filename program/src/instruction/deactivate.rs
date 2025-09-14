@@ -14,12 +14,12 @@ use crate::{
 };
 
 pub fn process_deactivate(accounts: &[AccountInfo]) -> ProgramResult {
-    // 1) Gather all tx signers (native pattern)
+    // 1) Gather all transaction signers
     let mut signers_buf = [Pubkey::default(); MAXIMUM_SIGNERS];
     let signers_len = collect_signers(accounts, &mut signers_buf)?;
     let signers = &signers_buf[..signers_len];
 
-    // 2) Accounts: stake, clock (native requires these two; extra accounts are ignored)
+    // 2) Accounts: stake, clock (extra accounts are ignored)
     let it = &mut accounts.iter();
     let stake_ai = next_account_info(it)?;
     let clock_ai = next_account_info(it)?;
@@ -35,7 +35,7 @@ pub fn process_deactivate(accounts: &[AccountInfo]) -> ProgramResult {
     // 4) Authorization + state transition
     match state {
         StakeStateV2::Stake(mut meta, mut stake, flags) => {
-            // require staker signature (just like native)
+            // Require staker signature
             meta.authorized
                 .check(signers, StakeAuthorize::Staker)
                 .map_err(to_program_error)?;

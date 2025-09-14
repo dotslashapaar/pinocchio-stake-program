@@ -11,21 +11,31 @@ pinocchio = "0.9.0"
 pinocchio-log = "0.5.0"
 pinocchio-pubkey = "0.3.0"
 pinocchio-system = "0.3.0"
-shank = "0.4.2"
 pinocchio-token = "0.4.0"
-
+shank = "0.4.2"
 
 [dev-dependencies]
-solana-sdk = "2.2.1"
-mollusk-svm = "0.4.0"
-mollusk-svm-bencher = "0.4.0"
+solana-program-test = "2.3.9"
+solana-sdk          = "2.3.1"
+tokio = { version = "1.39", features = ["macros", "rt-multi-thread"] }
+bincode = "1"
+test-case = "3"
 
 [features]
+# Build for the chain (SBF, no_std, real entrypoint, panic handler)
+sbf = ["bpf-entrypoint"]
+
+# Controls the entrypoint module inclusion
 bpf-entrypoint = []
 no-entrypoint = []
-test-default = ["no-entrypoint"]
-default = ["bpf-entrypoint"]
-bench-default = ["no-entrypoint"]
+
+# Host builds use std; tests run here
+std = []
+
+# Default host/dev: std + NO entrypoint (keeps IDE/cargo happy)
+default = ["std", "no-entrypoint"]
+e2e = []
+seed = []
 
 [profile.dev]
 panic = "abort"
@@ -33,4 +43,12 @@ panic = "abort"
 [profile.release]
 panic = "abort"
 
+[[test]]
+name = "program_test"
+path = "tests/program_test.rs"
+required-features = ["e2e"]
 
+[[test]]
+name = "authorize_with_seed"
+path = "tests/authorize_with_seed.rs"
+required-features = ["seed"]

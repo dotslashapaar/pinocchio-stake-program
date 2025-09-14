@@ -3,7 +3,7 @@ use pinocchio::{
     account_info::AccountInfo,
     program_error::ProgramError,
     pubkey::Pubkey,
-    sysvars::clock::{Clock, Epoch, UnixTimestamp}, // <-- include Clock here
+    sysvars::clock::{Clock, Epoch, UnixTimestamp},
 };
 
 #[repr(C)]
@@ -22,7 +22,7 @@ pub struct Lockup {
 #[repr(C)]
 #[derive(Default, Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Meta {
-    pub rent_exempt_reserve: [u8; 8], // unchanged in your codebase
+    pub rent_exempt_reserve: [u8; 8],
     pub authorized: Authorized,
     pub lockup: Lockup,
 }
@@ -104,7 +104,7 @@ impl Lockup {
         Ok(unsafe { &mut *(account.borrow_mut_data_unchecked().as_ptr() as *mut Self) })
     }
 
-    /// Native-equivalent: custodian signature bypasses lockup
+    /// Custodian signature bypasses lockup
     #[inline(always)]
     pub fn is_in_force(&self, clock: &Clock, custodian_signer: Option<&Pubkey>) -> bool {
         // Bypass if the configured custodian signed

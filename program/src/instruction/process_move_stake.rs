@@ -16,7 +16,7 @@ use crate::state::{MergeKind, StakeFlags, StakeStateV2};
 pub fn process_move_stake(accounts: &[AccountInfo], lamports: u64) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
 
-    // native asserts: 3 accounts
+    // Expected accounts: 3
     let source_stake_account_info = next_account_info(account_info_iter)?;
     let destination_stake_account_info = next_account_info(account_info_iter)?;
     let stake_authority_info = next_account_info(account_info_iter)?;
@@ -78,7 +78,7 @@ pub fn process_move_stake(accounts: &[AccountInfo], lamports: u64) -> ProgramRes
                 bytes_to_u64(source_stake.credits_observed),
             )?;
 
-            // flags cleared for active stake (matches native)
+            // Clear flags for active stake
             set_stake_state(
                 destination_stake_account_info,
                 &StakeStateV2::Stake(destination_meta, destination_stake, StakeFlags::empty()),

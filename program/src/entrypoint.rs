@@ -1,20 +1,18 @@
 use crate::{
-    helpers::get_minimum_delegation, instruction::{self, StakeInstruction}, state::{
-        accounts::{
-            AuthorizeCheckedWithSeedData, AuthorizeWithSeedData
-        }, StakeAuthorize
-    }
+    helpers::get_minimum_delegation,
+    instruction::{self, StakeInstruction},
+    state::{
+        accounts::{AuthorizeCheckedWithSeedData, AuthorizeWithSeedData},
+        StakeAuthorize,
+    },
 };
 use pinocchio::{
-    account_info::AccountInfo,
-    default_panic_handler, msg, no_allocator, program_entrypoint,
-    program_error::ProgramError, pubkey::Pubkey, ProgramResult,
+    account_info::AccountInfo, msg, program_entrypoint, program_error::ProgramError,
+    pubkey::Pubkey, ProgramResult,
 };
 
-// Program entrypoint boilerplate
+// Entrypoint macro
 program_entrypoint!(process_instruction);
-no_allocator!();
-default_panic_handler!();
 
 #[inline(always)]
 fn process_instruction(
@@ -22,12 +20,12 @@ fn process_instruction(
     accounts: &[AccountInfo],
     instruction_data: &[u8],
 ) -> ProgramResult {
-    // Strip off the 1-byte discriminator; the remainder belongs to the variant
+    // Split off the 1-byte discriminator; the remainder belongs to the variant
     let (disc, payload) = instruction_data
         .split_first()
         .ok_or(ProgramError::InvalidInstructionData)?;
 
-    // Small helper for u64 payloads (lamports, etc.)
+    // Helper for u64 payloads (lamports, etc.)
     let read_u64 = |data: &[u8]| -> Result<u64, ProgramError> {
         if data.len() != 8 {
             return Err(ProgramError::InvalidInstructionData);
@@ -62,7 +60,7 @@ instruction::initialize::initialize(accounts, authorized, lockup)
         }
         StakeInstruction::InitializeChecked => {
             msg!("Instruction: InitializeChecked");
-            // No payload; authorities are passed as accounts.
+            // No payload; authorities are passed as accounts
             instruction::initialize_checked::process_initialize_checked(accounts)
         }
 
@@ -88,7 +86,7 @@ instruction::initialize::initialize(accounts, authorized, lockup)
         StakeInstruction::AuthorizeWithSeed => {
             msg!("Instruction: AuthorizeWithSeed");
             let args = AuthorizeWithSeedData::parse(payload)?;
-            // module path may be `authorize_with_seed` in your tree
+            
             instruction::process_authorized_with_seeds::process_authorized_with_seeds(accounts, args)
         }
 
@@ -120,13 +118,13 @@ instruction::initialize::initialize(accounts, authorized, lockup)
         // --------------------------------------------------------------------
         StakeInstruction::DelegateStake => {
             msg!("Instruction: DelegateStake");
-            // No payload; behavior mirrors native (stake, vote, clock, history, config, auth, …)
+            // No payload; stake, vote, clock, history, config, auth are provided as accounts
             instruction::process_delegate::process_delegate(accounts)
         }
 
         StakeInstruction::Split => {
             msg!("Instruction: Split");
-            // Native Split carries the lamports to split
+            // Split carries the lamports to split
             let lamports = read_u64(payload)?;
             instruction::split::process_split(accounts, lamports)
         }
@@ -162,7 +160,6 @@ instruction::initialize::initialize(accounts, authorized, lockup)
         StakeInstruction::Merge => {
             msg!("Instruction: Merge");
             // No payload
-            // If your file is named `merge_dedicated.rs`, use that module path:
             instruction::merge_dedicated::process_merge(accounts)
         }
 
@@ -188,14 +185,18 @@ instruction::initialize::initialize(accounts, authorized, lockup)
             let value = crate::helpers::get_minimum_delegation();
             let data = value.to_le_bytes();
 
-            #[cfg(feature = "solana")]
-            {
-                pinocchio::program::set_return_data(&data);
-            }
-            #[cfg(not(feature = "solana"))]
-            unsafe {
-                pinocchio::syscalls::sol_set_return_data(data.as_ptr(), data.len() as u64);
-            }
+           #[cfg(not(feature = "std"))]
+    {
+        // Return data for on-chain consumers
+        pinocchio::program::set_return_data(&data);
+    }
+
+    // Host builds (std): no-op (no return data channel)
+    #[cfg(feature = "std")]
+    {
+        // No-op; tests can read `value` directly if needed
+        let _ = data;
+    }
 
             Ok(())
         }

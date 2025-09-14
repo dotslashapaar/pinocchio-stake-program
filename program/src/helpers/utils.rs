@@ -35,11 +35,9 @@ pub enum ErrorCode {
     TOOMANYSIGNERS = 0x1,
 }
 
-// almost all native stake program processors accumulate every account signer
-// they then defer all signer validation to functions on Meta or Authorized
-// this results in an instruction interface that is much looser than the one documented
-// to avoid breaking backwards compatibility, we do the same here
-// in the future, we may decide to tighten the interface and break badly formed transactions
+// Many stake instruction handlers accumulate all transaction signers first,
+// then defer authority checks to Meta/Authorized helpers. This preserves
+// compatibility with existing transactions.
 pub fn collect_signers(
     accounts: &[AccountInfo],
     array_of_signers: &mut [Pubkey; MAXIMUM_SIGNERS],
@@ -283,7 +281,7 @@ pub fn redelegate_stake(
     stake.set_credits_observed(vote_state.credits());
     Ok(())
 }
-// dont call this "move" because we have an instruction MoveLamports
+// Avoid naming this function "move" to prevent confusion with the MoveLamports instruction
 pub fn relocate_lamports(
     source_account_info: &AccountInfo,
     destination_account_info: &AccountInfo,

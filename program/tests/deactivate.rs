@@ -1,0 +1,200 @@
+mod common;
+use common::*;
+use solana_sdk::{
+    instruction::{AccountMeta, Instruction},
+    message::Message,
+    pubkey::Pubkey,
+    system_instruction,
+};
+
+fn vote_state_space() -> u64 {
+    std::mem::size_of::<pinocchio_stake::state::vote_state::VoteState>() as u64
+}
+
+async fn create_dummy_vote_account(ctx: &mut ProgramTestContext, kp: &Keypair) {
+    let rent = ctx.banks_client.get_rent().await.unwrap();
+    let space = vote_state_space();
+    let lamports = rent.minimum_balance(space as usize);
+    let ix = system_instruction::create_account(
+        &ctx.payer.pubkey(),
+        &kp.pubkey(),
+        lamports,
+        space,
+        &solana_sdk::system_program::id(),
+    );
+    let msg = Message::new(&[ix], Some(&ctx.payer.pubkey()));
+    let mut tx = Transaction::new_unsigned(msg);
+    tx.try_sign(&[&ctx.payer, kp], ctx.last_blockhash).unwrap();
+    ctx.banks_client.process_transaction(tx).await.unwrap();
+}
+
+#[tokio::test]
+async fn deactivate_success_after_delegate() {
+    let mut pt = common::program_test();
+    let mut ctx = pt.start_with_context().await;
+    let program_id = Pubkey::new_from_array(pinocchio_stake::ID);
+
+    // Stake authorities
+    let staker = Keypair::new();
+    let withdrawer = Keypair::new();
+
+    // Create stake account
+    let stake = Keypair::new();
+    let rent = ctx.banks_client.get_rent().await.unwrap();
+    let space = pinocchio_stake::state::stake_state_v2::StakeStateV2::ACCOUNT_SIZE as u64;
+    let reserve = rent.minimum_balance(space as usize);
+    let create_stake = system_instruction::create_account(
+        &ctx.payer.pubkey(),
+        &stake.pubkey(),
+        reserve,
+        space,
+        &program_id,
+    );
+    let msg = Message::new(&[create_stake], Some(&ctx.payer.pubkey()));
+    let mut tx = Transaction::new_unsigned(msg);
+    tx.try_sign(&[&ctx.payer, &stake], ctx.last_blockhash).unwrap();
+    ctx.banks_client.process_transaction(tx).await.unwrap();
+
+    // InitializeChecked (withdrawer signs)
+    let init_ix = Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(stake.pubkey(), false),
+            AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
+            AccountMeta::new_readonly(staker.pubkey(), false),
+            AccountMeta::new_readonly(withdrawer.pubkey(), true),
+        ],
+        data: vec![9u8],
+    };
+    let msg = Message::new(&[init_ix], Some(&ctx.payer.pubkey()));
+    let mut tx = Transaction::new_unsigned(msg);
+    tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
+    ctx.banks_client.process_transaction(tx).await.unwrap();
+
+    // Create a dummy vote account with the in-crate VoteState layout
+    let vote_acc = Keypair::new();
+    create_dummy_vote_account(&mut ctx, &vote_acc).await;
+
+    // DelegateStake to transition to Stake state
+    let del_ix = Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(stake.pubkey(), false), // stake
+            AccountMeta::new_readonly(vote_acc.pubkey(), false), // vote
+            AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
+            AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
+            AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false), // unused stake_config placeholder
+            AccountMeta::new_readonly(staker.pubkey(), true), // include staker as signer
+        ],
+        data: vec![2u8],
+    };
+    let msg = Message::new(&[del_ix], Some(&ctx.payer.pubkey()));
+    let mut tx = Transaction::new_unsigned(msg);
+    tx.try_sign(&[&ctx.payer, &staker], ctx.last_blockhash).unwrap();
+    ctx.banks_client.process_transaction(tx).await.unwrap();
+
+    // Deactivate: [stake, clock] + staker signer
+    let deact_ix = Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(stake.pubkey(), false),
+            AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
+            AccountMeta::new_readonly(staker.pubkey(), true),
+        ],
+        data: vec![5u8],
+    };
+    let msg = Message::new(&[deact_ix], Some(&ctx.payer.pubkey()));
+    let mut tx = Transaction::new_unsigned(msg);
+    tx.try_sign(&[&ctx.payer, &staker], ctx.last_blockhash).unwrap();
+    let res = ctx.banks_client.process_transaction(tx).await;
+    assert!(res.is_ok(), "Deactivate should succeed: {:?}", res);
+
+    // Validate deactivation_epoch set to current epoch
+    let clock = ctx.banks_client.get_sysvar::<solana_sdk::clock::Clock>().await.unwrap();
+    let acct = ctx.banks_client.get_account(stake.pubkey()).await.unwrap().unwrap();
+    let state = pinocchio_stake::state::stake_state_v2::StakeStateV2::deserialize(&acct.data).unwrap();
+    match state {
+        pinocchio_stake::state::stake_state_v2::StakeStateV2::Stake(_meta, stake_data, _flags) => {
+            let deact = u64::from_le_bytes(stake_data.delegation.deactivation_epoch);
+            assert_eq!(deact, clock.epoch, "deactivation epoch should match clock");
+        }
+        other => panic!("expected Stake state, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn deactivate_missing_staker_signature_fails() {
+    let mut pt = common::program_test();
+    let mut ctx = pt.start_with_context().await;
+    let program_id = Pubkey::new_from_array(pinocchio_stake::ID);
+
+    let staker = Keypair::new();
+    let withdrawer = Keypair::new();
+    let stake = Keypair::new();
+    let rent = ctx.banks_client.get_rent().await.unwrap();
+    let space = pinocchio_stake::state::stake_state_v2::StakeStateV2::ACCOUNT_SIZE as u64;
+    let reserve = rent.minimum_balance(space as usize);
+    let create_stake = system_instruction::create_account(
+        &ctx.payer.pubkey(),
+        &stake.pubkey(),
+        reserve,
+        space,
+        &program_id,
+    );
+    let msg = Message::new(&[create_stake], Some(&ctx.payer.pubkey()));
+    let mut tx = Transaction::new_unsigned(msg);
+    tx.try_sign(&[&ctx.payer, &stake], ctx.last_blockhash).unwrap();
+    ctx.banks_client.process_transaction(tx).await.unwrap();
+
+    // InitializeChecked
+    let init_ix = Instruction { program_id, accounts: vec![
+        AccountMeta::new(stake.pubkey(), false),
+        AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
+        AccountMeta::new_readonly(staker.pubkey(), false),
+        AccountMeta::new_readonly(withdrawer.pubkey(), true),
+    ], data: vec![9u8] };
+    let msg = Message::new(&[init_ix], Some(&ctx.payer.pubkey()));
+    let mut tx = Transaction::new_unsigned(msg);
+    tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
+    ctx.banks_client.process_transaction(tx).await.unwrap();
+
+    // Create dummy vote and delegate (with staker signature)
+    let vote_acc = Keypair::new();
+    create_dummy_vote_account(&mut ctx, &vote_acc).await;
+    let del_ix = Instruction { program_id, accounts: vec![
+        AccountMeta::new(stake.pubkey(), false),
+        AccountMeta::new_readonly(vote_acc.pubkey(), false),
+        AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
+        AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
+        AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
+        AccountMeta::new_readonly(staker.pubkey(), true),
+    ], data: vec![2u8]};
+    let msg = Message::new(&[del_ix], Some(&ctx.payer.pubkey()));
+    let mut tx = Transaction::new_unsigned(msg);
+    tx.try_sign(&[&ctx.payer, &staker], ctx.last_blockhash).unwrap();
+    ctx.banks_client.process_transaction(tx).await.unwrap();
+
+    // Now attempt Deactivate WITHOUT staker signer present
+    let deact_ix = Instruction { program_id, accounts: vec![
+        AccountMeta::new(stake.pubkey(), false),
+        AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
+        // no staker signer meta provided
+    ], data: vec![5u8]};
+    let msg = Message::new(&[deact_ix], Some(&ctx.payer.pubkey()));
+    let mut tx = Transaction::new_unsigned(msg);
+    tx.try_sign(&[&ctx.payer], ctx.last_blockhash).unwrap();
+    let err = ctx.banks_client.process_transaction(tx).await.unwrap_err();
+
+    match err {
+        solana_program_test::BanksClientError::TransactionError(te) => {
+            use solana_sdk::transaction::TransactionError;
+            use solana_sdk::instruction::InstructionError;
+            match te {
+                TransactionError::InstructionError(_, InstructionError::MissingRequiredSignature) => {}
+                TransactionError::InstructionError(_, InstructionError::Custom(_)) => {}
+                other => panic!("unexpected transaction error: {:?}", other),
+            }
+        }
+        other => panic!("unexpected banks client error: {:?}", other),
+    }
+}

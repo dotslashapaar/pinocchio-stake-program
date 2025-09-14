@@ -45,18 +45,18 @@ impl MergeKind {
         }
     }
 
-    /// Native-equivalent classification
+    /// Classification helper
        pub fn get_if_mergeable<T: StakeHistoryGetEntry>(
         stake_state: &StakeStateV2,
         stake_lamports: u64,
         clock: &Clock,
-        stake_history: &T,          // <-- generic over the trait, not a concrete type
+        stake_history: &T,
     ) -> Result<Self, ProgramError> {
         match stake_state {
             StakeStateV2::Stake(meta, stake, flags) => {
                 let status = stake.delegation.stake_activating_and_deactivating(
                     clock.epoch.to_le_bytes(),
-                    stake_history,                                 // <-- OK for any T: StakeHistoryGetEntry
+                    stake_history,
                     crate::helpers::constant::PERPETUAL_NEW_WARMUP_COOLDOWN_RATE_EPOCH,
                 );
                 let effective    = crate::helpers::bytes_to_u64(status.effective);
@@ -65,7 +65,15 @@ impl MergeKind {
                 let delegated    = crate::helpers::bytes_to_u64(stake.delegation.stake);
 
                 match (effective, activating, deactivating) {
-                    (0, 0, 0) => Ok(Self::Inactive(*meta, stake_lamports, *flags)),
+                    (0, 0, 0) => {
+                        // If history is unavailable or yields zeros, but the stake is delegated
+                        // and not deactivating, treat it as FullyActive for move/merge eligibility.
+                        if delegated > 0 && bytes_to_u64(stake.delegation.deactivation_epoch) == u64::MAX {
+                            Ok(Self::FullyActive(*meta, *stake))
+                        } else {
+                            Ok(Self::Inactive(*meta, stake_lamports, *flags))
+                        }
+                    }
                     (0, _, _) => Ok(Self::ActivationEpoch(*meta, *stake, *flags)),
                     (_, 0, 0) if effective == delegated => Ok(Self::FullyActive(*meta, *stake)),
                     _ => Err(ProgramError::InvalidAccountData),
@@ -78,14 +86,14 @@ impl MergeKind {
         }
     }
 
-    /// Native-equivalent metadata check for merge
+    /// Metadata compatibility check for merge
     pub fn metas_can_merge(dest: &Meta, source: &Meta, clock: &Clock) -> ProgramResult {
         // Authorities must match exactly
         if dest.authorized != source.authorized {
             return Err(ProgramError::InvalidAccountData);
         }
 
-        // Lockups may differ, but both must be expired (custodian does not bypass merges)
+        // Lockups may differ, but both must be expired
         let can_merge_lockups =
             dest.lockup == source.lockup
             || (!dest.lockup.is_in_force(clock, None) && !source.lockup.is_in_force(clock, None));
@@ -97,7 +105,7 @@ impl MergeKind {
         }
     }
 
-    /// Native-equivalent active delegation compatibility
+    /// Active delegation compatibility
     pub fn active_delegations_can_merge(
         dest: &crate::state::delegation::Delegation,
         source: &crate::state::delegation::Delegation,
@@ -113,17 +121,14 @@ impl MergeKind {
         }
     }
 
-    /// Native-equivalent merge behavior
+    /// Merge behavior
     pub fn merge(
         self,
         source: Self,
         _clock: &Clock,
     ) -> Result<Option<StakeStateV2>, ProgramError> {
         // validate metas
-        // (Note: `metas_can_merge` should be called by the instruction before this,
-        // but we keep native shape and call again here as well.)
-        // We need a Clock for metas_can_merge, but we only used it for lockup; caller already checked,
-        // so we’ll trust caller and skip here to avoid double sysvar passing.
+        // Caller is expected to have run metas_can_merge
 
         // If both are active kinds, validate active delegations
         if let (Some(dst), Some(src)) = (self.active_stake(), source.active_stake()) {

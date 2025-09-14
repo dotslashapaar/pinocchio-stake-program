@@ -14,7 +14,7 @@ pub fn initialize(
     lockup: Lockup
 ) -> ProgramResult {
     
-    // native asserts: 2 accounts (1 sysvar)}
+    // Expected accounts: 2 (1 sysvar)
         let [stake_account_info, rent_info, _rest @ ..] = accounts else{
         return Err(ProgramError::NotEnoughAccountKeys);
     };
