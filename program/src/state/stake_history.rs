@@ -1,9 +1,11 @@
 use crate::helpers::get_sysvar;
-use crate::ID;
 use core::mem::size_of;
 use pinocchio::sysvars::clock::Epoch;
 
-// we do not provide Default because this requires the real current epoch
+// Stake History sysvar id on Solana
+pinocchio_pubkey::declare_id!("SysvarStakeHistory1111111111111111111111111");
+
+// Default is not provided because it would require the real current epoch
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct StakeHistorySysvar(pub Epoch);
 pub const MAX_STAKE_HISTORY_ENTRIES: usize = 512;
@@ -139,6 +141,7 @@ impl StakeHistoryGetEntry for StakeHistorySysvar {
             .checked_add(core::mem::size_of::<u64>() as u64)?;
 
         let mut entry_buf = [0; EPOCH_AND_ENTRY_SERIALIZED_SIZE as usize];
+        // Use this module's Sysvar ID (not the program ID)
         let result = get_sysvar(&mut entry_buf, &ID, offset, EPOCH_AND_ENTRY_SERIALIZED_SIZE);
 
         match result {

@@ -8,7 +8,7 @@ use pinocchio::{
 
 use crate::{
     helpers::{collect_signers, get_stake_state, set_stake_state, MAXIMUM_SIGNERS},
-    helpers::authorize_update, // <- your shared policy helper
+    helpers::authorize_update,
     state::{
         accounts::AuthorizeWithSeedData,
         stake_state_v2::StakeStateV2,
@@ -17,13 +17,13 @@ use crate::{
 };
 
 
-// Native definition: sha256(base || seed || owner)
+// Definition: sha256(base || seed || owner)
 fn derive_with_seed_compat(
     base: &Pubkey,
     seed: &[u8],
     owner: &Pubkey,
 ) -> Result<Pubkey, ProgramError> {
-    // Native enforces max seed length 32 bytes for `create_with_seed`
+    // Enforce max seed length 32 bytes for `create_with_seed`
     if seed.len() > 32 {
         return Err(ProgramError::InvalidInstructionData);
     }
@@ -46,7 +46,7 @@ fn derive_with_seed_compat(
 
     // sha256(buf[..off]) -> 32 bytes
     let mut out = [0u8; 32];
-    // SAFETY: calling Solana/Pinocchio syscall directly
+    // Call syscall directly
     let rc = unsafe {
         pinocchio::syscalls::sol_sha256(buf.as_ptr(), off as u64, out.as_mut_ptr())
     };
@@ -55,14 +55,14 @@ fn derive_with_seed_compat(
         return Err(ProgramError::InvalidInstructionData);
     }
 
-    Ok(out) // Pubkey is [u8; 32] in Pinocchio
+    Ok(out)
 }
 
 pub fn process_authorized_with_seeds(
     accounts: &[AccountInfo],
     args: AuthorizeWithSeedData, // already has: new_authorized, stake_authorize, authority_seed, authority_owner
 ) -> ProgramResult { 
-    // Native requires: stake, base, clock (and optional custodian)
+    // Required accounts: stake, base, clock (optional custodian)
     if accounts.len() < 3 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
@@ -87,7 +87,7 @@ pub fn process_authorized_with_seeds(
     let maybe_lockup_authority: Option<&AccountInfo> = rest.first();
 
    
-    // Build the signer set (like native)
+    // Build the signer set
     let mut signers_buf = [Pubkey::default(); MAXIMUM_SIGNERS];
     let mut n = collect_signers(accounts, &mut signers_buf)?;
     let mut push_signer = |pk: Pubkey| -> Result<(), ProgramError> {
@@ -99,21 +99,12 @@ pub fn process_authorized_with_seeds(
         Ok(())
     };
 
-    // If the base signed, derive the "seed authority" and add it to signers
-    if base_ai.is_signer() {
-        // If your AuthorizeWithSeedData stores the seed as Vec<u8>, just pass it as bytes.
-        let derived = derive_with_seed_compat(
-            base_ai.key(),
-            &args.authority_seed,
-            &args.authority_owner,
-        )?;
-        push_signer(derived)?;
-    }
+    // If the base signed, no additional derivation is needed; the base signature suffices
 
     // Final signer slice we pass to the policy
     let signers = &signers_buf[..n];
 
-    // Load state, apply policy update, write back — mirrors native do_authorize()
+    // Load state, apply policy update, write back
     match get_stake_state(stake_ai)? {
         StakeStateV2::Initialized(mut meta) => {
             authorize_update(

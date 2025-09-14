@@ -11,8 +11,8 @@ use crate::{
     state::{stake_state_v2::StakeStateV2, StakeAuthorize},
 };
 
-/// Pinocchio port of native `process_authorize_checked`.
-/// Accounts (native requires 4 + optional custodian):
+/// Authorize (checked) instruction
+/// Accounts (4 + optional custodian):
 ///   0. [writable] Stake account (must be owned by stake program)
 ///   1. [sysvar]   Clock
 ///   2. []         Old stake/withdraw authority (presence only; no strict signer requirement here)
@@ -22,7 +22,7 @@ pub fn process_authorize_checked(
     accounts: &[AccountInfo],
     authority_type: StakeAuthorize,
 ) -> ProgramResult {
-    // native asserts: 4 accounts (1 sysvar)
+    // Expected accounts: 4 (1 sysvar)
     if accounts.len() < 4 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
@@ -32,7 +32,7 @@ pub fn process_authorize_checked(
         return Err(ProgramError::InvalidAccountData);
     };
 
-    // Basic safety checks matching native intent
+    // Basic safety checks
     if *stake_ai.owner() != crate::ID || !stake_ai.is_writable() {
         return Err(ProgramError::IncorrectProgramId);
     }
@@ -40,7 +40,7 @@ pub fn process_authorize_checked(
         return Err(ProgramError::InvalidArgument);
     }
 
-    // New authority MUST be a signer (native checks this explicitly)
+    // New authority must be a signer
     if !new_auth_ai.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
     }
@@ -51,15 +51,15 @@ pub fn process_authorize_checked(
     // Load clock
     let clock = unsafe { Clock::from_account_info_unchecked(clock_ai)? };
 
-    // Collect all transaction signers (native collects a set and passes it forward)
+    // Collect all transaction signers
     let mut signers_buf = [Pubkey::default(); MAXIMUM_SIGNERS];
     let n = collect_signers(accounts, &mut signers_buf)?;
     let signers = &signers_buf[..n];
 
-    // New authority comes from the 4th account (not from instruction data in the *checked* variant)
+    // New authority comes from the 4th account (not from instruction data in the checked variant)
     let new_authorized: Pubkey = *new_auth_ai.key();
 
-    // Load -> authorize -> store (mirrors native `do_authorize`)
+    // Load -> authorize -> store
     match get_stake_state(stake_ai)? {
         StakeStateV2::Initialized(mut meta) => {
             authorize_update(

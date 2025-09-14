@@ -67,22 +67,22 @@ pub fn process_set_lockup_checked(
     // stake, [old_auth?], [new_lockup_auth?], ...
     let stake_ai = &accounts[0];
 
-    // Parse the "checked" payload
+    // Parse the payload
     let checked = LockupCheckedData::parse(instruction_data)?;
 
-    // Collect all signers (loose model; native behavior)
+    // Collect all signers
     let mut signer_buf = [Pubkey::default(); MAXIMUM_SIGNERS];
     let n = collect_signers(accounts, &mut signer_buf)?;
     let signers = &signer_buf[..n];
 
-    // Optional new custodian comes from account #2 and MUST be a signer if present
+    // Optional new custodian comes from account #2 and must be a signer if present
     let custodian_update: Option<Pubkey> = match accounts.get(2) {
         Some(ai) if ai.is_signer() => Some(*ai.key()),
         Some(_ai) => return Err(ProgramError::MissingRequiredSignature),
         None => None, // no custodian change
     };
 
-    // Native uses Clock::get() (no clock account is required)
+    // Use Clock::get() (no clock account is required)
     let clock = Clock::get()?;
 
     // Owner check happens in get_stake_state()

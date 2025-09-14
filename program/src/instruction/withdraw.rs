@@ -1,5 +1,6 @@
 use pinocchio::{
     account_info::AccountInfo,
+    msg,
     program_error::ProgramError,
     sysvars::clock::Clock,
     ProgramResult,
@@ -19,7 +20,7 @@ use crate::{
 pub fn process_withdraw(accounts: &[AccountInfo], withdraw_lamports: u64) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
 
-    // native asserts: 5 accounts (2 sysvars)
+    // Expected accounts: 5 (including 2 sysvars)
     let source_stake_account_info = next_account_info(account_info_iter)?;
     let destination_info = next_account_info(account_info_iter)?;
     let clock_info = next_account_info(account_info_iter)?;
@@ -28,11 +29,27 @@ pub fn process_withdraw(accounts: &[AccountInfo], withdraw_lamports: u64) -> Pro
     // other accounts (optional)
     let option_lockup_authority_info = next_account_info(account_info_iter).ok();
 
+    // Fast path: Uninitialized source with source signer — no sysvars needed
+    match get_stake_state(source_stake_account_info) {
+        Ok(StakeStateV2::Uninitialized) => {
+            msg!("Withdraw: source=Uninitialized fast path");
+            if !source_stake_account_info.is_signer() {
+                return Err(ProgramError::MissingRequiredSignature);
+            }
+            relocate_lamports(
+                source_stake_account_info,
+                destination_info,
+                withdraw_lamports,
+            )?;
+            return Ok(());
+        }
+        _ => {}
+    }
+
     let clock = &Clock::from_account_info(clock_info)?;
     let stake_history = &StakeHistorySysvar(clock.epoch);
 
-    // Exactly like native: require withdraw authority signer; if custodian account is supplied,
-    // it must also be a signer.
+    // Require withdraw authority signer; if custodian account is supplied it must also be a signer
     let (signers_set, custodian) =
         collect_signers_checked(Some(withdraw_authority_info), option_lockup_authority_info)?;
 
@@ -56,10 +73,10 @@ pub fn process_withdraw(accounts: &[AccountInfo], withdraw_lamports: u64) -> Pro
                 .check(signers_slice, StakeAuthorize::Withdrawer)
                 .map_err(to_program_error)?;
 
-            // Convert LE-encoded fields to u64
+            // Convert little-endian fields to u64
             let deact_epoch = u64::from_le_bytes(stake.delegation.deactivation_epoch);
             let staked: u64 = if clock.epoch >= deact_epoch {
-                // Your Delegation::stake expects LE-encoded epoch + rate
+                // Delegation::stake expects little-endian epoch + rate
                 stake.delegation.stake(
                     clock.epoch.to_le_bytes(),
                     stake_history,
@@ -83,7 +100,7 @@ pub fn process_withdraw(accounts: &[AccountInfo], withdraw_lamports: u64) -> Pro
             (meta.lockup, rent_reserve, false)
         }
         StakeStateV2::Uninitialized => {
-            // For Uninitialized, the source account itself must sign (native passes it twice)
+            // For Uninitialized, the source account itself must sign
             let source_key = *source_stake_account_info.key();
             if !signers_set.contains(&source_key) {
                 return Err(ProgramError::MissingRequiredSignature);
@@ -115,7 +132,7 @@ pub fn process_withdraw(accounts: &[AccountInfo], withdraw_lamports: u64) -> Pro
         }
     }
 
-    // Move lamports after state update (native ordering)
+    // Move lamports after state update
     relocate_lamports(
         source_stake_account_info,
         destination_info,

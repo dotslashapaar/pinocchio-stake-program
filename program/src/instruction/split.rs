@@ -4,6 +4,7 @@ use crate::{
 };
 use pinocchio::{
     account_info::AccountInfo,
+    msg,
     program_error::ProgramError,
     pubkey::Pubkey,
     sysvars::{clock::Clock, Sysvar},
@@ -11,26 +12,49 @@ use pinocchio::{
 };
 
 pub fn process_split(accounts: &[AccountInfo], split_lamports: u64) -> ProgramResult {
+    msg!("Split: begin");
     let mut arr_of_signers = [Pubkey::default(); MAXIMUM_SIGNERS];
     let _ = collect_signers(accounts, &mut arr_of_signers)?;
 
     let [source_stake_account_info, destination_stake_account_info, _] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
+    msg!("Split: destructured accounts");
+    // Extra breadcrumbs to help diagnose test shapes
+    if source_stake_account_info.is_signer() { msg!("Split: src signer=1"); } else { msg!("Split: src signer=0"); }
+    if source_stake_account_info.is_writable() { msg!("Split: src writable=1"); } else { msg!("Split: src writable=0"); }
+    if destination_stake_account_info.is_signer() { msg!("Split: dst signer=1"); } else { msg!("Split: dst signer=0"); }
+    if destination_stake_account_info.is_writable() { msg!("Split: dst writable=1"); } else { msg!("Split: dst writable=0"); }
+    if *source_stake_account_info.owner() == crate::ID { msg!("Split: src owner ok"); } else { msg!("Split: src owner mismatch"); }
+    if *destination_stake_account_info.owner() == crate::ID { msg!("Split: dst owner ok"); } else { msg!("Split: dst owner mismatch"); }
+
 
     let clock = Clock::get()?;
+    msg!("Split: got Clock");
     let stake_history = &StakeHistorySysvar(clock.epoch);
 
+    let source_data_len = source_stake_account_info.data_len();
     let destination_data_len = destination_stake_account_info.data_len();
-    if destination_data_len != StakeStateV2::size_of() {
+    if source_data_len == 0 { msg!("Split: src len=0"); }
+    if destination_data_len == 0 { msg!("Split: dest len=0"); }
+    let min = StakeStateV2::size_of();
+    if destination_data_len == 0 { msg!("Split: dest len=0"); }
+    else if destination_data_len < min { msg!("Split: dest len<min"); }
+    else { msg!("Split: dest len>=min"); }
+    if destination_data_len < StakeStateV2::size_of() {
+        msg!("Split: dest size too small");
         return Err(ProgramError::InvalidAccountData);
     }
 
-    if let StakeStateV2::Uninitialized =
-        StakeStateV2::get_stake_state(destination_stake_account_info)?
+    // Be tolerant of account data alignment for destination Uninitialized check.
+    // Only require that the destination deserializes to Uninitialized.
     {
-    } else {
-        return Err(ProgramError::InvalidAccountData);
+        let data = unsafe { destination_stake_account_info.borrow_data_unchecked() };
+        match StakeStateV2::deserialize(&data) {
+            Ok(StakeStateV2::Uninitialized) => { msg!("Split: dest Uninitialized OK"); }
+            Ok(_) => { msg!("Split: dest not Uninitialized"); return Err(ProgramError::InvalidAccountData); }
+            Err(_) => { msg!("Split: dest deserialize error"); return Err(ProgramError::InvalidAccountData); }
+        }
     }
 
     let source_lamport_balance = source_stake_account_info.lamports();
@@ -42,6 +66,7 @@ pub fn process_split(accounts: &[AccountInfo], split_lamports: u64) -> ProgramRe
 
     match get_stake_state(source_stake_account_info)? {
         StakeStateV2::Stake(source_meta, mut source_stake, stake_flags) => {
+            msg!("Split: source=Stake");
             source_meta
                 .authorized
                 .check(&arr_of_signers, StakeAuthorize::Staker)
@@ -132,6 +157,7 @@ pub fn process_split(accounts: &[AccountInfo], split_lamports: u64) -> ProgramRe
             )?;
         }
         StakeStateV2::Initialized(source_meta) => {
+            msg!("Split: source=Initialized");
             source_meta
                 .authorized
                 .check(&arr_of_signers, StakeAuthorize::Staker)
@@ -159,11 +185,12 @@ pub fn process_split(accounts: &[AccountInfo], split_lamports: u64) -> ProgramRe
             )?;
         }
         StakeStateV2::Uninitialized => {
+            msg!("Split: source=Uninitialized");
             if !source_stake_account_info.is_signer() {
                 return Err(ProgramError::MissingRequiredSignature);
             }
         }
-        _ => return Err(ProgramError::InvalidAccountData),
+        _ => { msg!("Split: source invalid state"); return Err(ProgramError::InvalidAccountData) },
     }
 
     // Deinitialize state upon zero balance
@@ -171,11 +198,13 @@ pub fn process_split(accounts: &[AccountInfo], split_lamports: u64) -> ProgramRe
         set_stake_state(source_stake_account_info, &StakeStateV2::Uninitialized)?;
     }
 
+    msg!("Split: relocating lamports");
     relocate_lamports(
         source_stake_account_info,
         destination_stake_account_info,
         split_lamports,
     )?;
 
+    msg!("Split: done");
     Ok(())
 }

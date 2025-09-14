@@ -228,7 +228,7 @@ impl Default for Delegation {
 
 impl Stake {
     /// Whether this stake is considered active for the given epoch
-    /// (simple window check; native's *effective* check is done via `Stake::stake`)
+    /// (simple window check; the effective check is done via `Stake::stake`)
     pub fn is_active(&self, current_epoch: u64, _stake_history: &StakeHistorySysvar) -> bool {
         let act = bytes_to_u64(self.delegation.activation_epoch);
         let deact = bytes_to_u64(self.delegation.deactivation_epoch);

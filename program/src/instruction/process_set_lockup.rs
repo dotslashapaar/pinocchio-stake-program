@@ -14,19 +14,18 @@ use crate::{
 };
 
 pub fn process_set_lockup(accounts: &[AccountInfo], instruction_data: &[u8]) -> ProgramResult {
-    // Match native’s iteration/shape:
-    // native asserts: 1 account (stake), but additional accounts may be supplied
+    // Iterate accounts: first is stake; additional accounts may be supplied
     let account_info_iter = &mut accounts.iter();
     let stake_account_info = next_account_info(account_info_iter)?;
-    // (Native ignores/permits additional accounts; we use them only to collect signers.)
+    // Additional accounts are considered for signer collection
 
-    // Parse payload into optional fields (no “must set at least one” rule in native)
+    // Parse payload into optional fields
     let args = SetLockupData::instruction_data(instruction_data);
 
-    // Native reads the clock sysvar directly (no clock account is required)
+    // Read the clock sysvar directly (no clock account is required)
     let clock = Clock::get()?;
 
-    // Collect *all* signers from all provided accounts (native behavior)
+    // Collect all signers from all provided accounts
     let mut signer_buf = [Pubkey::default(); MAXIMUM_SIGNERS];
     let n = collect_signers(accounts, &mut signer_buf)?;
     let signers = &signer_buf[..n];
@@ -48,7 +47,7 @@ pub fn process_set_lockup(accounts: &[AccountInfo], instruction_data: &[u8]) -> 
     }
 }
 
-/// Exactly the native gating in `Meta::set_lockup`:
+/// Lockup gating in `Meta::set_lockup`:
 /// - If lockup is in force → current custodian must have signed
 /// - Else → current withdraw authority must have signed
 /// Then apply any provided fields as-is.
@@ -60,7 +59,7 @@ fn apply_lockup_update(
 ) -> ProgramResult {
     let signed = |pk: &Pubkey| signers.iter().any(|s| s == pk);
 
-    // Lockup in force? (native passes None here; no custodian bypass)
+    // Lockup in force? (pass None to disallow custodian bypass)
     let in_force = meta.lockup.is_in_force(clock, None);
 
     if in_force {
@@ -71,15 +70,12 @@ fn apply_lockup_update(
         return Err(ProgramError::MissingRequiredSignature);
     }
 
-    // Apply optional fields like native (no monotonicity check, no “must set one”)
+    // Apply optional fields (no monotonicity check)
     if let Some(ts) = args.unix_timestamp {
-        // If your Lockup fields are numeric (i64), keep this:
         meta.lockup.unix_timestamp = ts;
-        // If your Lockup uses [u8; 8], do: meta.lockup.unix_timestamp = ts.to_le_bytes();
     }
     if let Some(ep) = args.epoch {
         meta.lockup.epoch = ep;
-        // If [u8; 8] layout: meta.lockup.epoch = ep.to_le_bytes();
     }
     if let Some(cust) = args.custodian {
         meta.lockup.custodian = cust;

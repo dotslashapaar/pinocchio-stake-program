@@ -7,7 +7,7 @@ use crate::{
     helpers::{collect_signers, get_stake_state, set_stake_state, MAXIMUM_SIGNERS},
     state::{accounts::AuthorizeData, stake_state_v2::StakeStateV2, StakeAuthorize},
 };
-use crate::helpers::authorize_update; // << add this
+use crate::helpers::authorize_update; 
 
 fn parse_authorize_data(data: &[u8]) -> Result<AuthorizeData, ProgramError> {
     if data.len() != 33 { return Err(ProgramError::InvalidInstructionData); }
@@ -44,7 +44,7 @@ pub fn process_authorize(
     // Optional lockup custodian (as a reference)
     let maybe_lockup_authority: Option<&AccountInfo> = rest.first();
 
-    // Collect all signers (native-style)
+    // Collect all signers
     let mut signers_buf = [Pubkey::default(); MAXIMUM_SIGNERS];
     let n = collect_signers(accounts, &mut signers_buf)?;
     let signers = &signers_buf[..n];

@@ -17,14 +17,14 @@ use crate::{
     state::{StakeAuthorize, StakeFlags, StakeHistorySysvar, StakeStateV2},
 };
 
-/// Native-equivalent of Delegate (works for initial delegation and redelegation)
+/// Redelegate/Delegate helper (works for initial delegation and redelegation)
 pub fn redelegate(accounts: &[AccountInfo]) -> ProgramResult {
-    // Collect signers (native behavior: accumulate all signers from the full account list)
+    // Collect signers from the full account list
     let mut signers_buf = [Pubkey::default(); MAXIMUM_SIGNERS];
     let n = collect_signers(accounts, &mut signers_buf)?;
     let signers = &signers_buf[..n];
 
-    // native asserts: 5 accounts (2 sysvars + stake config)
+    // Expected accounts: 5 (2 sysvars + stake config)
     let account_info_iter = &mut accounts.iter();
     let stake_account_info = next_account_info(account_info_iter)?;
     let vote_account_info  = next_account_info(account_info_iter)?;
@@ -33,7 +33,7 @@ pub fn redelegate(accounts: &[AccountInfo]) -> ProgramResult {
     let _stake_config      = next_account_info(account_info_iter)?; // present but not read directly
 
     let clock = &Clock::from_account_info(clock_info)?;
-    let stake_history = StakeHistorySysvar(clock.epoch); // <-- epoch, not slot
+    let stake_history = StakeHistorySysvar(clock.epoch);
 
     let vote_state = get_vote_state(vote_account_info)?;
 

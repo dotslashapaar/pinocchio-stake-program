@@ -30,10 +30,10 @@ pub fn process_deactivate_delinquent(accounts: &[AccountInfo]) -> ProgramResult 
     let delinquent_vote_ai = next_account_info(iter)?;
     let reference_vote_ai  = next_account_info(iter)?;
 
-    // --- Clock (native uses the current epoch) ---
+    // --- Clock (use current epoch) ---
     let clock = Clock::get()?;
 
-    // --- Optional owner check for vote accounts (mirrors your existing pattern) ---
+    // --- Optional owner check for vote accounts ---
     let vote_pid = vote_program_id();
     if vote_pid != Pubkey::default() {
         if *reference_vote_ai.owner() != vote_pid || *delinquent_vote_ai.owner() != vote_pid {
@@ -74,7 +74,7 @@ pub fn process_deactivate_delinquent(accounts: &[AccountInfo]) -> ProgramResult 
             }
 
             if delinquent_is_eligible {
-                // native sets deactivation_epoch = current epoch
+                // Set deactivation_epoch = current epoch
                 stake.deactivate(clock.epoch.to_le_bytes())
                     .map_err(to_program_error)?;
                 set_stake_state(stake_ai, &StakeStateV2::Stake(meta, stake, flags))
@@ -94,7 +94,7 @@ fn acceptable_reference_epoch_credits_bytes(
     current_epoch: u64,
     n: u64,
 ) -> Result<bool, ProgramError> {
-    // Layout assumed by your existing code/tests:
+    // Layout assumed by tests:
     // [0..4] u32 count, then `count` * (epoch:u64, credits:u64, prev:u64)
     if data.len() < 4 {
         return Err(ProgramError::InvalidAccountData);

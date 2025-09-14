@@ -89,7 +89,7 @@ pub fn move_stake_or_lamports_shared_checks(
         &stake_history,
     )?;
 
-    // Ensure metas are compatible per native logic (auth/lockups)
+    // Ensure metadata is compatible (authorities and lockups)
     MergeKind::metas_can_merge(
         source_merge_kind.meta(),
         destination_merge_kind.meta(),

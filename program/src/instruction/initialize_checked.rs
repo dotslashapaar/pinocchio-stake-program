@@ -17,7 +17,7 @@ use crate::{
 };
 
 pub fn process_initialize_checked(accounts: &[AccountInfo]) -> ProgramResult {
-    // Native requires: 4 accounts (stake, rent, stake_authority, withdraw_authority)
+    // Expected accounts: 4 (stake, rent, stake_authority, withdraw_authority)
     if accounts.len() < 4 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
@@ -25,7 +25,7 @@ pub fn process_initialize_checked(accounts: &[AccountInfo]) -> ProgramResult {
         return Err(ProgramError::InvalidAccountData);
     };
 
-    // Withdraw authority MUST sign (native)
+    // Withdraw authority must sign
     if !withdraw_auth_ai.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
     }
@@ -34,25 +34,25 @@ pub fn process_initialize_checked(accounts: &[AccountInfo]) -> ProgramResult {
     if !stake_ai.is_writable() {
         return Err(ProgramError::InvalidAccountData);
     }
-    // get_stake_state() will also enforce program owner; we keep this explicit check helpful
+    // get_stake_state() also enforces program owner; this explicit check is retained for clarity
     // but not strictly required if you prefer to rely solely on get_stake_state().
     // if *stake_ai.owner() != crate::ID {
     //     return Err(ProgramError::InvalidAccountOwner);
     // }
 
-    // Rent sysvar must be passed (native uses from_account_info; here assert presence and read Rent)
+    // Rent sysvar must be passed (assert presence and read Rent)
     if rent_ai.key() != &pinocchio::sysvars::rent::RENT_ID {
         return Err(ProgramError::InvalidArgument);
     }
     let rent = Rent::get()?; // Pinocchio Sysvar access
 
-    // Ensure the stake account is currently Uninitialized (native do_initialize does this)
+    // Ensure the stake account is currently Uninitialized
     match get_stake_state(stake_ai)? {
         StakeStateV2::Uninitialized => {
             // Compute the rent-exempt reserve for the account's current data length
             let required_rent = rent.minimum_balance(stake_ai.data_len());
 
-            // Ensure the account has enough lamports for rent exemption (native behavior)
+            // Ensure the account has enough lamports for rent exemption
             if stake_ai.lamports() < required_rent {
                 return Err(ProgramError::InsufficientFunds);
             }
@@ -64,8 +64,6 @@ pub fn process_initialize_checked(accounts: &[AccountInfo]) -> ProgramResult {
             };
 
             // Build Meta with default lockup
-            // NOTE: If your `Meta.rent_exempt_reserve` is `u64` instead of `[u8; 8]`,
-            //       assign `required_rent` directly (remove `.to_le_bytes()`).
             let meta = Meta {
                 rent_exempt_reserve: required_rent.to_le_bytes(),
                 authorized,

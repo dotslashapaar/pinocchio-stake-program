@@ -1,4 +1,4 @@
-// instruction/process_delegate.rs
+// Delegate instruction
 use pinocchio::{
     account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, sysvars::clock::Clock,
     ProgramResult,
@@ -16,12 +16,12 @@ use crate::state::stake_history::StakeHistorySysvar;
 use crate::state::{StakeAuthorize, StakeFlags, StakeStateV2};
 
 pub fn process_delegate(accounts: &[AccountInfo]) -> ProgramResult {
-    // gather signers (native-compatible, loose collection)
+    // Gather signers
     let mut signers_array = [Pubkey::default(); MAXIMUM_SIGNERS];
     let signers_count = collect_signers(accounts, &mut signers_array)?;
     let signers = &signers_array[..signers_count];
 
-    // native asserts: 5 accounts (2 sysvars + stake config)
+    // Expected accounts: stake, vote, clock, stake_history, stake_config
     let account_info_iter = &mut accounts.iter();
     let stake_account_info = next_account_info(account_info_iter)?;
     let vote_account_info = next_account_info(account_info_iter)?;
@@ -36,16 +36,16 @@ pub fn process_delegate(accounts: &[AccountInfo]) -> ProgramResult {
 
     match get_stake_state(stake_account_info)? {
         StakeStateV2::Initialized(meta) => {
-            // staker must sign
+            // Staker must sign
             meta.authorized
                 .check(signers, StakeAuthorize::Staker)
                 .map_err(to_program_error)?;
 
-            // how much can be delegated (lamports - rent_exempt_reserve)
+            // Amount delegated = lamports - rent_exempt_reserve
             let ValidatedDelegatedInfo { stake_amount } =
                 validate_delegated_amount(stake_account_info, &meta)?;
 
-            // create stake and store
+            // Create stake and store
             let stake = new_stake(
                 stake_amount,
                 vote_account_info.key(),
@@ -59,7 +59,7 @@ pub fn process_delegate(accounts: &[AccountInfo]) -> ProgramResult {
             )
         }
         StakeStateV2::Stake(meta, mut stake, flags) => {
-            // staker must sign
+            // Staker must sign
             meta.authorized
                 .check(signers, StakeAuthorize::Staker)
                 .map_err(to_program_error)?;
@@ -67,7 +67,7 @@ pub fn process_delegate(accounts: &[AccountInfo]) -> ProgramResult {
             let ValidatedDelegatedInfo { stake_amount } =
                 validate_delegated_amount(stake_account_info, &meta)?;
 
-            // follow native: let helper decide (active? rescind? error? re-delegate?)
+            // Let helper update stake state (possible rescind or re-delegate)
             redelegate_stake(
                 &mut stake,
                 stake_amount,
