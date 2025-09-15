@@ -54,47 +54,87 @@ pub fn move_stake_or_lamports_shared_checks(
 ) -> Result<(MergeKind, MergeKind), ProgramError> {
     // Authority must sign (simplified check)
     if !stake_authority_info.is_signer() {
+        pinocchio::msg!("shared_checks: missing signer");
         return Err(ProgramError::MissingRequiredSignature);
     }
 
     // Confirm not the same account
     if *source_stake_account_info.key() == *destination_stake_account_info.key() {
+        pinocchio::msg!("shared_checks: same account");
         return Err(ProgramError::InvalidInstructionData);
     }
 
     // Source and destination must be writable
     if !source_stake_account_info.is_writable() || !destination_stake_account_info.is_writable() {
+        pinocchio::msg!("shared_checks: not writable");
         return Err(ProgramError::InvalidInstructionData);
     }
 
     // Must move something
     if lamports == 0 {
+        pinocchio::msg!("shared_checks: zero lamports");
         return Err(ProgramError::InvalidArgument);
     }
 
     let clock = Clock::get()?;
     let stake_history = StakeHistorySysvar(clock.epoch);
 
+    // Quick sanity logs
+    if *source_stake_account_info.owner() != crate::ID {
+        pinocchio::msg!("shared_checks: src wrong owner");
+    }
+    if *destination_stake_account_info.owner() != crate::ID {
+        pinocchio::msg!("shared_checks: dst wrong owner");
+    }
+    if source_stake_account_info.data_len() != crate::state::stake_state_v2::StakeStateV2::size_of() {
+        pinocchio::msg!("shared_checks: src size mismatch");
+    }
+    if destination_stake_account_info.data_len() != crate::state::stake_state_v2::StakeStateV2::size_of() {
+        pinocchio::msg!("shared_checks: dst size mismatch");
+    }
+
     // Ensure neither account is transient and both are mergeable
-    let source_merge_kind = MergeKind::get_if_mergeable(
-        &get_stake_state(source_stake_account_info)?,
+    let source_state = get_stake_state(source_stake_account_info)?;
+    let source_merge_kind = match MergeKind::get_if_mergeable(
+        &source_state,
         source_stake_account_info.lamports(),
         &clock,
         &stake_history,
-    )?;
-    let destination_merge_kind = MergeKind::get_if_mergeable(
-        &get_stake_state(destination_stake_account_info)?,
+    ) {
+        Ok(k) => k,
+        Err(e) => {
+            pinocchio::msg!("shared_checks: source not mergeable");
+            return Err(e);
+        }
+    };
+
+    let destination_state = get_stake_state(destination_stake_account_info)?;
+    let destination_merge_kind = match MergeKind::get_if_mergeable(
+        &destination_state,
         destination_stake_account_info.lamports(),
         &clock,
         &stake_history,
-    )?;
+    ) {
+        Ok(k) => k,
+        Err(e) => {
+            pinocchio::msg!("shared_checks: destination not mergeable");
+            return Err(e);
+        }
+    };
+
+    // Log the classification paths for debugging
+    pinocchio::msg!("shared_checks: classified source");
+    pinocchio::msg!("shared_checks: classified destination");
 
     // Ensure metadata is compatible (authorities and lockups)
-    MergeKind::metas_can_merge(
+    if let Err(e) = MergeKind::metas_can_merge(
         source_merge_kind.meta(),
         destination_merge_kind.meta(),
         &clock,
-    )?;
+    ) {
+        pinocchio::msg!("shared_checks: metas cannot merge");
+        return Err(e);
+    }
 
     Ok((source_merge_kind, destination_merge_kind))
 }

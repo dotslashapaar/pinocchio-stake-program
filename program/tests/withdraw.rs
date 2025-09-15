@@ -171,10 +171,13 @@ async fn withdraw_initialized_full_closes_account() {
     let res = ctx.banks_client.process_transaction(tx).await;
     assert!(res.is_ok(), "Full withdraw should succeed on Initialized");
 
-    let acct_after = ctx.banks_client.get_account(stake_acc.pubkey()).await.unwrap().unwrap();
-    assert_eq!(acct_after.lamports, 0);
-    let state = pinocchio_stake::state::stake_state_v2::StakeStateV2::deserialize(&acct_after.data).unwrap();
-    assert!(matches!(state, pinocchio_stake::state::stake_state_v2::StakeStateV2::Uninitialized));
+    // Account may be purged by runtime when lamports reach zero. Accept either case.
+    let acct_after_opt = ctx.banks_client.get_account(stake_acc.pubkey()).await.unwrap();
+    if let Some(acct_after) = acct_after_opt {
+        assert_eq!(acct_after.lamports, 0);
+        let state = pinocchio_stake::state::stake_state_v2::StakeStateV2::deserialize(&acct_after.data).unwrap();
+        assert!(matches!(state, pinocchio_stake::state::stake_state_v2::StakeStateV2::Uninitialized));
+    }
 }
 
 #[tokio::test]
@@ -361,8 +364,11 @@ async fn withdraw_stake_after_deactivate_full_succeeds() {
     let res = ctx.banks_client.process_transaction(tx).await;
     assert!(res.is_ok(), "Full withdraw after deactivation should succeed: {:?}", res);
 
-    let after = ctx.banks_client.get_account(stake.pubkey()).await.unwrap().unwrap();
-    assert_eq!(after.lamports, 0);
-    let state = pinocchio_stake::state::stake_state_v2::StakeStateV2::deserialize(&after.data).unwrap();
-    assert!(matches!(state, pinocchio_stake::state::stake_state_v2::StakeStateV2::Uninitialized));
+    // Account may be purged by runtime when lamports reach zero. Accept either case.
+    let after_opt = ctx.banks_client.get_account(stake.pubkey()).await.unwrap();
+    if let Some(after) = after_opt {
+        assert_eq!(after.lamports, 0);
+        let state = pinocchio_stake::state::stake_state_v2::StakeStateV2::deserialize(&after.data).unwrap();
+        assert!(matches!(state, pinocchio_stake::state::stake_state_v2::StakeStateV2::Uninitialized));
+    }
 }
