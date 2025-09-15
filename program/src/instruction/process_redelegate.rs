@@ -10,7 +10,7 @@ use crate::{
     error::to_program_error,
     helpers::{collect_signers, next_account_info},
     helpers::utils::{
-        get_stake_state, get_vote_state, new_stake, redelegate_stake, set_stake_state,
+        get_stake_state, get_vote_credits, new_stake_with_credits, redelegate_stake_with_credits, set_stake_state,
         validate_delegated_amount, ValidatedDelegatedInfo,
     },
     helpers::constant::MAXIMUM_SIGNERS,
@@ -35,7 +35,7 @@ pub fn redelegate(accounts: &[AccountInfo]) -> ProgramResult {
     let clock = &Clock::from_account_info(clock_info)?;
     let stake_history = StakeHistorySysvar(clock.epoch);
 
-    let vote_state = get_vote_state(vote_account_info)?;
+    let vote_credits = get_vote_credits(vote_account_info)?;
 
     match get_stake_state(stake_account_info)? {
         StakeStateV2::Initialized(meta) => {
@@ -49,11 +49,11 @@ pub fn redelegate(accounts: &[AccountInfo]) -> ProgramResult {
                 validate_delegated_amount(stake_account_info, &meta)?;
 
             // create stake delegated to the vote account
-            let stake = new_stake(
+            let stake = new_stake_with_credits(
                 stake_amount,
                 vote_account_info.key(),
-                &vote_state,
                 clock.epoch,
+                vote_credits,
             );
 
             set_stake_state(
@@ -71,11 +71,11 @@ pub fn redelegate(accounts: &[AccountInfo]) -> ProgramResult {
                 validate_delegated_amount(stake_account_info, &meta)?;
 
             // Delegate helper enforces the active-stake rules & rescind-on-same-voter case.
-            redelegate_stake(
+            redelegate_stake_with_credits(
                 &mut stake,
                 stake_amount,
                 vote_account_info.key(),
-                &vote_state,
+                vote_credits,
                 clock.epoch,
                 &stake_history,
             )?;

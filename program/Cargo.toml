@@ -13,6 +13,8 @@ pinocchio-pubkey = "0.3.0"
 pinocchio-system = "0.3.0"
 pinocchio-token = "0.4.0"
 shank = "0.4.2"
+serde = { version = "1", features = ["derive"] }
+bincode = "1"
 
 [dev-dependencies]
 solana-program-test = "2.3.9"

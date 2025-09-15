@@ -99,7 +99,11 @@ pub fn process_authorized_with_seeds(
         Ok(())
     };
 
-    // If the base signed, no additional derivation is needed; the base signature suffices
+    // If the base signed, include the derived address (create_with_seed) in the signer set
+    if base_ai.is_signer() {
+        let derived = derive_with_seed_compat(base_ai.key(), args.authority_seed, &args.authority_owner)?;
+        push_signer(derived)?;
+    }
 
     // Final signer slice we pass to the policy
     let signers = &signers_buf[..n];

@@ -6,17 +6,20 @@ use solana_sdk::{
     pubkey::Pubkey,
     system_instruction,
 };
+use std::str::FromStr;
 
 async fn create_vote_like_account(ctx: &mut ProgramTestContext, kp: &Keypair) {
     let rent = ctx.banks_client.get_rent().await.unwrap();
     let space = std::mem::size_of::<pinocchio_stake::state::vote_state::VoteState>() as u64;
     let lamports = rent.minimum_balance(space as usize);
+    // Set the owner to the real Vote program to satisfy strict owner check
+    let vote_program_id = Pubkey::from_str("Vote111111111111111111111111111111111111111").unwrap();
     let ix = system_instruction::create_account(
         &ctx.payer.pubkey(),
         &kp.pubkey(),
         lamports,
         space,
-        &solana_sdk::system_program::id(),
+        &vote_program_id,
     );
     let msg = Message::new(&[ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);

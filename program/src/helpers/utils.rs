@@ -185,6 +185,10 @@ pub(crate) fn validate_split_amount(
 
 // returns a deserialized vote state from raw account data
 pub fn get_vote_state(vote_account_info: &AccountInfo) -> Result<VoteState, ProgramError> {
+    // owner must be the vote program
+    if *vote_account_info.owner() != crate::state::vote_state::vote_program_id() {
+        return Err(ProgramError::IncorrectProgramId);
+    }
     // enforce account is large enough
     let data = unsafe { vote_account_info.borrow_data_unchecked() };
     if data.len() < core::mem::size_of::<VoteState>() {
@@ -193,6 +197,25 @@ pub fn get_vote_state(vote_account_info: &AccountInfo) -> Result<VoteState, Prog
 
     let vote_state = unsafe { &*(data.as_ptr() as *const VoteState) };
     Ok(vote_state.clone())
+}
+
+// Lightweight helper to read the latest credits from a vote account without
+// constructing a full VoteState on stack. This reduces SBF stack usage.
+pub fn get_vote_credits(vote_account_info: &AccountInfo) -> Result<u64, ProgramError> {
+    if *vote_account_info.owner() != crate::state::vote_state::vote_program_id() {
+        return Err(ProgramError::IncorrectProgramId);
+    }
+    let data = vote_account_info.try_borrow_data()?;
+    if data.len() < 4 { return Err(ProgramError::InvalidAccountData); }
+    let mut n_bytes = [0u8; 4];
+    n_bytes.copy_from_slice(&data[0..4]);
+    let count = u32::from_le_bytes(n_bytes) as usize;
+    if count == 0 { return Ok(0); }
+    let off = 4 + (count - 1) * 24 + 8; // last entry credits at offset +8 within the 24-byte tuple
+    if off + 8 > data.len() { return Err(ProgramError::InvalidAccountData); }
+    let mut c = [0u8; 8];
+    c.copy_from_slice(&data[off..off+8]);
+    Ok(u64::from_le_bytes(c))
 }
 
 // load stake state from account
@@ -243,6 +266,18 @@ pub fn new_stake(
     stake
 }
 
+pub fn new_stake_with_credits(
+    stake_amount: u64,
+    vote_pubkey: &Pubkey,
+    activation_epoch: u64,
+    credits_observed: u64,
+) -> Stake {
+    let mut stake = Stake::default();
+    stake.delegation = Delegation::new(vote_pubkey, stake_amount, activation_epoch.to_le_bytes());
+    stake.set_credits_observed(credits_observed);
+    stake
+}
+
 // modify existing stake object with updated delegation
 // utils.rs (only this function shown)
 pub fn redelegate_stake(
@@ -279,6 +314,37 @@ pub fn redelegate_stake(
     stake.delegation.deactivation_epoch = u64::MAX.to_le_bytes();
     stake.delegation.voter_pubkey = *voter_pubkey;
     stake.set_credits_observed(vote_state.credits());
+    Ok(())
+}
+
+pub fn redelegate_stake_with_credits(
+    stake: &mut Stake,
+    stake_lamports: u64,
+    voter_pubkey: &Pubkey,
+    credits_observed: u64,
+    epoch: u64,
+    stake_history: &StakeHistorySysvar,
+) -> Result<(), ProgramError> {
+    let effective = stake.stake(
+        epoch.to_le_bytes(),
+        stake_history,
+        PERPETUAL_NEW_WARMUP_COOLDOWN_RATE_EPOCH,
+    );
+    if effective != 0 {
+        if stake.delegation.voter_pubkey == *voter_pubkey
+            && bytes_to_u64(stake.delegation.deactivation_epoch) == epoch
+        {
+            stake.delegation.deactivation_epoch = u64::MAX.to_le_bytes();
+            return Ok(());
+        } else {
+            return Err(to_program_error(StakeError::TooSoonToRedelegate));
+        }
+    }
+    stake.delegation.stake = stake_lamports.to_le_bytes();
+    stake.delegation.activation_epoch = epoch.to_le_bytes();
+    stake.delegation.deactivation_epoch = u64::MAX.to_le_bytes();
+    stake.delegation.voter_pubkey = *voter_pubkey;
+    stake.set_credits_observed(credits_observed);
     Ok(())
 }
 // Avoid naming this function "move" to prevent confusion with the MoveLamports instruction

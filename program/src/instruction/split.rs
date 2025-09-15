@@ -20,7 +20,7 @@ pub fn process_split(accounts: &[AccountInfo], split_lamports: u64) -> ProgramRe
         return Err(ProgramError::NotEnoughAccountKeys);
     };
     msg!("Split: destructured accounts");
-    // Extra breadcrumbs to help diagnose test shapes
+    // Diagnostics for test shapes
     if source_stake_account_info.is_signer() { msg!("Split: src signer=1"); } else { msg!("Split: src signer=0"); }
     if source_stake_account_info.is_writable() { msg!("Split: src writable=1"); } else { msg!("Split: src writable=0"); }
     if destination_stake_account_info.is_signer() { msg!("Split: dst signer=1"); } else { msg!("Split: dst signer=0"); }
