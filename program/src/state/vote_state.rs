@@ -1,5 +1,6 @@
 
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
+use pinocchio_pubkey::declare_id;
 
 /// (epoch, credits, prev_credits)
 pub type EpochCredits = (u64, u64, u64);
@@ -109,7 +110,8 @@ pub fn parse_epoch_credits_slice(data: &[u8]) -> Option<EpochCreditsList> {
 }
 
 #[inline]
-pub fn vote_program_id() -> Pubkey {
+declare_id!("Vote111111111111111111111111111111111111111");
 
-    Pubkey::default()
+pub fn vote_program_id() -> Pubkey {
+    Pubkey::try_from(&ID[..]).unwrap_or_default()
 }

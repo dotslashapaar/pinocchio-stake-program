@@ -6,7 +6,7 @@ use pinocchio::{
 
 use crate::{
     helpers::{bytes_to_u64, checked_add, get_stake_state},
-    state::{delegation::Stake, MergeKind, StakeHistorySysvar},
+    state::{delegation::Stake, MergeKind, StakeAuthorize, StakeHistorySysvar},
 };
 
 pub fn stake_weighted_credits_observed(
@@ -52,7 +52,7 @@ pub fn move_stake_or_lamports_shared_checks(
     destination_stake_account_info: &AccountInfo,
     stake_authority_info: &AccountInfo,
 ) -> Result<(MergeKind, MergeKind), ProgramError> {
-    // Authority must sign (simplified check)
+    // Authority must sign
     if !stake_authority_info.is_signer() {
         pinocchio::msg!("shared_checks: missing signer");
         return Err(ProgramError::MissingRequiredSignature);
@@ -107,6 +107,12 @@ pub fn move_stake_or_lamports_shared_checks(
             return Err(e);
         }
     };
+
+    // Authorized staker check on the source metadata
+    let src_meta = source_merge_kind.meta();
+    if src_meta.authorized.staker != *stake_authority_info.key() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
 
     let destination_state = get_stake_state(destination_stake_account_info)?;
     let destination_merge_kind = match MergeKind::get_if_mergeable(

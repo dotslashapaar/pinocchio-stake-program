@@ -10,60 +10,38 @@ use crate::helpers::{
     set_stake_state,
     get_stake_state,
 };
-use crate::helpers::merge::merge_delegation_stake_and_credits_observed; // adjust path if you re-export at crate::helpers::*
+use crate::helpers::merge::{
+    merge_delegation_stake_and_credits_observed,
+    move_stake_or_lamports_shared_checks,
+};
 use crate::state::{MergeKind, StakeFlags, StakeStateV2};
 
 pub fn process_move_stake(accounts: &[AccountInfo], lamports: u64) -> ProgramResult {
-    pinocchio::msg!("MS: start");
-    let account_info_iter = &mut accounts.iter();
-
+    let it = &mut accounts.iter();
     // Expected accounts: 3
-    let source_stake_account_info = next_account_info(account_info_iter)?;
-    let destination_stake_account_info = next_account_info(account_info_iter)?;
-    let stake_authority_info = next_account_info(account_info_iter)?;
+    let source_stake_account_info = next_account_info(it)?;
+    let destination_stake_account_info = next_account_info(it)?;
+    let stake_authority_info = next_account_info(it)?;
 
-    pinocchio::msg!("MS: got accounts");
-    // Lightweight local checks instead of full shared merge checks
-    if !stake_authority_info.is_signer() {
-        pinocchio::msg!("MS: missing signer");
-        return Err(ProgramError::MissingRequiredSignature);
-    }
-    if !source_stake_account_info.is_writable() || !destination_stake_account_info.is_writable() {
-        pinocchio::msg!("MS: not writable");
-        return Err(ProgramError::InvalidInstructionData);
-    }
-    if *source_stake_account_info.key() == *destination_stake_account_info.key() {
-        pinocchio::msg!("MS: same account");
-        return Err(ProgramError::InvalidInstructionData);
-    }
-    if lamports == 0 {
-        pinocchio::msg!("MS: zero lamports");
-        return Err(ProgramError::InvalidArgument);
+    // Shared checks + classification (auth, writable, nonzero, compatible metas)
+    let (source_kind, destination_kind) = move_stake_or_lamports_shared_checks(
+        source_stake_account_info,
+        lamports,
+        destination_stake_account_info,
+        stake_authority_info,
+    )?;
+
+    // Native safeguard: require exact account data size
+    if source_stake_account_info.data_len() != StakeStateV2::size_of()
+        || destination_stake_account_info.data_len() != StakeStateV2::size_of()
+    {
+        return Err(ProgramError::InvalidAccountData);
     }
 
-    // Skip strict size equality; rely on (de)serialization bounds checks
-
-    // Load source state and require an active delegation (no deactivation scheduled)
-    let (source_meta, mut source_stake) = match get_stake_state(source_stake_account_info) {
-        Err(e) => {
-            pinocchio::msg!("MoveStake: get_stake_state(src) failed");
-            return Err(e);
-        }
-        Ok(state) => match state {
-        StakeStateV2::Stake(meta, stake, _flags) => {
-            if bytes_to_u64(stake.delegation.deactivation_epoch) != u64::MAX {
-                pinocchio::msg!("MoveStake: source deactivating");
-                return Err(ProgramError::InvalidAccountData);
-            }
-            (meta, stake)
-        }
-        _ => {
-            pinocchio::msg!("MoveStake: source not Stake state");
-            return Err(ProgramError::InvalidAccountData);
-        }
-    },
+    // Source must be fully active
+    let MergeKind::FullyActive(source_meta, mut source_stake) = source_kind else {
+        return Err(ProgramError::InvalidAccountData);
     };
-    pinocchio::msg!("MS: loaded source");
 
     let minimum_delegation = get_minimum_delegation();
     let source_effective_stake = source_stake.delegation.stake;
@@ -79,14 +57,8 @@ pub fn process_move_stake(accounts: &[AccountInfo], lamports: u64) -> ProgramRes
     }
 
     // destination must be fully active or fully inactive
-    let destination_meta = match get_stake_state(destination_stake_account_info) {
-        Err(e) => {
-            pinocchio::msg!("MoveStake: get_stake_state(dst) failed");
-            return Err(e);
-        }
-        Ok(state) => match state {
-        StakeStateV2::Stake(destination_meta, mut destination_stake, _f) => {
-            pinocchio::msg!("MS: dst active");
+    let destination_meta = match destination_kind {
+        MergeKind::FullyActive(destination_meta, mut destination_stake) => {
             // active destination must share the same vote account
             if source_stake.delegation.voter_pubkey != destination_stake.delegation.voter_pubkey {
                 return Err(to_program_error(StakeError::VoteAddressMismatch));
@@ -116,8 +88,7 @@ pub fn process_move_stake(accounts: &[AccountInfo], lamports: u64) -> ProgramRes
 
             destination_meta
         }
-        StakeStateV2::Initialized(destination_meta) => {
-            pinocchio::msg!("MS: dst inactive");
+        MergeKind::Inactive(destination_meta, _lamports, _flags) => {
             // inactive destination must receive at least the minimum delegation
             if lamports < minimum_delegation {
                 return Err(ProgramError::InvalidArgument);
@@ -134,13 +105,8 @@ pub fn process_move_stake(accounts: &[AccountInfo], lamports: u64) -> ProgramRes
 
             destination_meta
         }
-        _other => {
-            pinocchio::msg!("MoveStake: destination invalid kind");
-            return Err(ProgramError::InvalidAccountData);
-        }
-    },
+        _ => return Err(ProgramError::InvalidAccountData),
     };
-    pinocchio::msg!("MS: prepared dst");
 
     // write back source: either to Initialized(meta) if emptied, or Stake with reduced stake
     if source_final_stake == 0 {
@@ -155,7 +121,6 @@ pub fn process_move_stake(accounts: &[AccountInfo], lamports: u64) -> ProgramRes
             &StakeStateV2::Stake(source_meta, source_stake, StakeFlags::empty()),
         )?;
     }
-    pinocchio::msg!("MS: wrote source");
 
     // physically move lamports between accounts
     relocate_lamports(
@@ -163,7 +128,6 @@ pub fn process_move_stake(accounts: &[AccountInfo], lamports: u64) -> ProgramRes
         destination_stake_account_info,
         lamports,
     )?;
-    pinocchio::msg!("MS: moved lamports");
 
     // guard against impossible (rent) underflows due to any mismatch in math
     if source_stake_account_info.lamports() < bytes_to_u64(source_meta.rent_exempt_reserve)

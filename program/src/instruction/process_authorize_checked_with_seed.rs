@@ -86,7 +86,16 @@ pub fn process_authorize_checked_with_seed(
     let mut signers_buf = [Pubkey::default(); MAXIMUM_SIGNERS];
     let mut n = collect_signers(accounts, &mut signers_buf)?;
 
-    // If old base signed, we accept that signature; no additional derivation necessary
+    // If old base signed, include the derived address (create_with_seed) in the signer set
+    if old_base_ai.is_signer() {
+        let derived = derive_with_seed_compat(old_base_ai.key(), args.authority_seed, &args.authority_owner)?;
+        if n < MAXIMUM_SIGNERS {
+            signers_buf[n] = derived;
+            n += 1;
+        } else {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+    }
 
     let signers = &signers_buf[..n];
 

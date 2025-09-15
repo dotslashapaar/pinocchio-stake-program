@@ -1,6 +1,7 @@
 mod common;
 use common::*;
 use solana_sdk::{instruction::{AccountMeta, Instruction}, pubkey::Pubkey, system_instruction, message::Message};
+use std::str::FromStr;
 
 #[tokio::test]
 async fn withdraw_uninitialized_partial() {
@@ -227,7 +228,8 @@ async fn withdraw_stake_active_fails_partial() {
     // create a minimal vote account with byte layout expected by get_vote_state
     let vote_space = std::mem::size_of::<pinocchio_stake::state::vote_state::VoteState>() as u64;
     let vote_lamports = rent.minimum_balance(vote_space as usize);
-    let create_vote = system_instruction::create_account(&ctx.payer.pubkey(), &vote.pubkey(), vote_lamports, vote_space, &solana_sdk::system_program::id());
+    let vote_program_id = Pubkey::from_str("Vote111111111111111111111111111111111111111").unwrap();
+    let create_vote = system_instruction::create_account(&ctx.payer.pubkey(), &vote.pubkey(), vote_lamports, vote_space, &vote_program_id);
     let msg = Message::new(&[create_vote], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &vote], ctx.last_blockhash).unwrap();
@@ -311,7 +313,8 @@ async fn withdraw_stake_after_deactivate_full_succeeds() {
     let vote = Keypair::new();
     let vote_space = std::mem::size_of::<pinocchio_stake::state::vote_state::VoteState>() as u64;
     let vote_lamports = rent.minimum_balance(vote_space as usize);
-    let create_vote = system_instruction::create_account(&ctx.payer.pubkey(), &vote.pubkey(), vote_lamports, vote_space, &solana_sdk::system_program::id());
+    let vote_program_id = Pubkey::from_str("Vote111111111111111111111111111111111111111").unwrap();
+    let create_vote = system_instruction::create_account(&ctx.payer.pubkey(), &vote.pubkey(), vote_lamports, vote_space, &vote_program_id);
     let msg = Message::new(&[create_vote], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &vote], ctx.last_blockhash).unwrap();

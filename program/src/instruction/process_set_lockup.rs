@@ -47,11 +47,44 @@ pub fn process_set_lockup(accounts: &[AccountInfo], instruction_data: &[u8]) -> 
     }
 }
 
+// Bincode-decoded variant: accept parsed LockupArgs directly (native parity)
+pub fn process_set_lockup_parsed(
+    accounts: &[AccountInfo],
+    lockup: crate::state::accounts::SetLockupData, // we will translate to Meta updates
+) -> ProgramResult {
+    // Iterate accounts: first is stake
+    let account_info_iter = &mut accounts.iter();
+    let stake_account_info = next_account_info(account_info_iter)?;
+
+    // Read the clock sysvar directly (no clock account required)
+    let clock = Clock::get()?;
+
+    // Collect signers
+    let mut signer_buf = [Pubkey::default(); MAXIMUM_SIGNERS];
+    let n = collect_signers(accounts, &mut signer_buf)?;
+    let signers = &signer_buf[..n];
+
+    match get_stake_state(stake_account_info)? {
+        StakeStateV2::Initialized(mut meta) => {
+            apply_lockup_update(&mut meta, &lockup, &clock, signers)?;
+            set_stake_state(stake_account_info, &StakeStateV2::Initialized(meta))
+        }
+        StakeStateV2::Stake(mut meta, stake, stake_flags) => {
+            apply_lockup_update(&mut meta, &lockup, &clock, signers)?;
+            set_stake_state(
+                stake_account_info,
+                &StakeStateV2::Stake(meta, stake, stake_flags),
+            )
+        }
+        _ => Err(ProgramError::InvalidAccountData),
+    }
+}
+
 /// Lockup gating in `Meta::set_lockup`:
 /// - If lockup is in force → current custodian must have signed
 /// - Else → current withdraw authority must have signed
 /// Then apply any provided fields as-is.
-fn apply_lockup_update(
+pub fn apply_lockup_update(
     meta: &mut Meta,
     args: &SetLockupData,
     clock: &Clock,

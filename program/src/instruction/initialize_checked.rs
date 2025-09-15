@@ -40,11 +40,11 @@ pub fn process_initialize_checked(accounts: &[AccountInfo]) -> ProgramResult {
     //     return Err(ProgramError::InvalidAccountOwner);
     // }
 
-    // Rent sysvar must be passed (assert presence and read Rent)
+    // Rent sysvar must be passed (assert presence and read Rent from account)
     if rent_ai.key() != &pinocchio::sysvars::rent::RENT_ID {
         return Err(ProgramError::InvalidArgument);
     }
-    let rent = Rent::get()?; // Pinocchio Sysvar access
+    let rent = Rent::from_account_info(rent_ai)?;
 
     // Ensure the stake account is currently Uninitialized
     match get_stake_state(stake_ai)? {

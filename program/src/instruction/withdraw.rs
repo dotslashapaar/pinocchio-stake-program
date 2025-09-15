@@ -14,9 +14,7 @@ use crate::{
 };
 use pinocchio::pubkey::Pubkey;
 
-// If these helpers live in the same module as this function, you don't need these imports.
-// If they live elsewhere, import them from the right path.
-// use crate::processor::{get_stake_state, set_stake_state, relocate_lamports};
+//
 
 pub fn process_withdraw(accounts: &[AccountInfo], withdraw_lamports: u64) -> ProgramResult {
     msg!("Withdraw: enter");

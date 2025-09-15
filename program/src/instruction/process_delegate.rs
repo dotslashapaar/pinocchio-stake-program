@@ -10,7 +10,8 @@ use crate::helpers::{
     ValidatedDelegatedInfo,
 };
 use crate::helpers::utils::{
-    get_stake_state, get_vote_state, new_stake, redelegate_stake, set_stake_state,
+    get_stake_state, get_vote_credits, new_stake_with_credits, redelegate_stake_with_credits,
+    set_stake_state,
 };
 use crate::state::stake_history::StakeHistorySysvar;
 use crate::state::{StakeAuthorize, StakeFlags, StakeStateV2};
@@ -32,7 +33,7 @@ pub fn process_delegate(accounts: &[AccountInfo]) -> ProgramResult {
     let clock = &Clock::from_account_info(clock_info)?;
     let stake_history = &StakeHistorySysvar(clock.epoch);
 
-    let vote_state = get_vote_state(vote_account_info)?;
+    let vote_credits = get_vote_credits(vote_account_info)?;
 
     match get_stake_state(stake_account_info)? {
         StakeStateV2::Initialized(meta) => {
@@ -46,11 +47,11 @@ pub fn process_delegate(accounts: &[AccountInfo]) -> ProgramResult {
                 validate_delegated_amount(stake_account_info, &meta)?;
 
             // Create stake and store
-            let stake = new_stake(
+            let stake = new_stake_with_credits(
                 stake_amount,
                 vote_account_info.key(),
-                &vote_state,
                 clock.epoch,
+                vote_credits,
             );
 
             set_stake_state(
@@ -68,11 +69,11 @@ pub fn process_delegate(accounts: &[AccountInfo]) -> ProgramResult {
                 validate_delegated_amount(stake_account_info, &meta)?;
 
             // Let helper update stake state (possible rescind or re-delegate)
-            redelegate_stake(
+            redelegate_stake_with_credits(
                 &mut stake,
                 stake_amount,
                 vote_account_info.key(),
-                &vote_state,
+                vote_credits,
                 clock.epoch,
                 stake_history,
             )?;
