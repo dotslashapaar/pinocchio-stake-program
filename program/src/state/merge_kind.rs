@@ -74,7 +74,17 @@ impl MergeKind {
                             Ok(Self::Inactive(*meta, stake_lamports, *flags))
                         }
                     }
-                    (0, _, _) => Ok(Self::ActivationEpoch(*meta, *stake, *flags)),
+                    (0, _, _) => {
+                        // Fallback: if activation is in the past and there's no deactivation scheduled,
+                        // but history doesn't report progress, consider it FullyActive for classification.
+                        let act_epoch = bytes_to_u64(stake.delegation.activation_epoch);
+                        let deact_epoch = bytes_to_u64(stake.delegation.deactivation_epoch);
+                        if delegated > 0 && deact_epoch == u64::MAX && clock.epoch > act_epoch {
+                            Ok(Self::FullyActive(*meta, *stake))
+                        } else {
+                            Ok(Self::ActivationEpoch(*meta, *stake, *flags))
+                        }
+                    }
                     (_, 0, 0) if effective == delegated => Ok(Self::FullyActive(*meta, *stake)),
                     _ => Err(ProgramError::InvalidAccountData),
                 }

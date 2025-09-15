@@ -8,16 +8,18 @@ use pinocchio::{
 
 use crate::{
     error::{to_program_error, StakeError},
-    helpers::{checked_add, collect_signers_checked, get_stake_state, next_account_info, relocate_lamports, set_stake_state, MAXIMUM_SIGNERS},
+    helpers::{checked_add, get_stake_state, next_account_info, relocate_lamports, set_stake_state},
     state::{Lockup, StakeAuthorize, StakeHistorySysvar, StakeStateV2},
 
 };
+use pinocchio::pubkey::Pubkey;
 
 // If these helpers live in the same module as this function, you don't need these imports.
 // If they live elsewhere, import them from the right path.
 // use crate::processor::{get_stake_state, set_stake_state, relocate_lamports};
 
 pub fn process_withdraw(accounts: &[AccountInfo], withdraw_lamports: u64) -> ProgramResult {
+    msg!("Withdraw: enter");
     let account_info_iter = &mut accounts.iter();
 
     // Expected accounts: 5 (including 2 sysvars)
@@ -46,28 +48,39 @@ pub fn process_withdraw(accounts: &[AccountInfo], withdraw_lamports: u64) -> Pro
         _ => {}
     }
 
+    msg!("Withdraw: load clock");
     let clock = &Clock::from_account_info(clock_info)?;
     let stake_history = &StakeHistorySysvar(clock.epoch);
 
     // Require withdraw authority signer; if custodian account is supplied it must also be a signer
-    let (signers_set, custodian) =
-        collect_signers_checked(Some(withdraw_authority_info), option_lockup_authority_info)?;
-
-    // Authorized::check expects &[[u8; 32]], so convert the set to a compact slice.
-    let mut signer_buf = [[0u8; 32]; MAXIMUM_SIGNERS];
+    msg!("Withdraw: gather signers");
+    let mut signer_keys: [Pubkey; 2] = [Pubkey::default(); 2];
     let mut n = 0usize;
-    for k in signers_set.iter() {
-        if n == MAXIMUM_SIGNERS {
-            break;
-        }
-        signer_buf[n] = *k;
+    if withdraw_authority_info.is_signer() {
+        signer_keys[n] = *withdraw_authority_info.key();
         n += 1;
+    } else {
+        return Err(ProgramError::MissingRequiredSignature);
     }
-    let signers_slice: &[[u8; 32]] = &signer_buf[..n];
+    let custodian: Option<&Pubkey> = match option_lockup_authority_info {
+        Some(ai) => {
+            if ai.is_signer() {
+                signer_keys[n] = *ai.key();
+                n += 1;
+                Some(ai.key())
+            } else {
+                return Err(ProgramError::MissingRequiredSignature);
+            }
+        }
+        None => None,
+    };
+    let signers_slice: &[Pubkey] = &signer_keys[..n];
 
     // Decide withdrawal constraints based on current stake state
+    msg!("Withdraw: read state");
     let (lockup, reserve_u64, is_staked) = match get_stake_state(source_stake_account_info)? {
         StakeStateV2::Stake(meta, stake, _stake_flags) => {
+            msg!("Withdraw: state=Stake");
             // Must have withdraw authority
             meta.authorized
                 .check(signers_slice, StakeAuthorize::Withdrawer)
@@ -91,6 +104,7 @@ pub fn process_withdraw(accounts: &[AccountInfo], withdraw_lamports: u64) -> Pro
             (meta.lockup, staked_plus_reserve, staked != 0)
         }
         StakeStateV2::Initialized(meta) => {
+            msg!("Withdraw: state=Initialized");
             // Must have withdraw authority
             meta.authorized
                 .check(signers_slice, StakeAuthorize::Withdrawer)
@@ -100,9 +114,8 @@ pub fn process_withdraw(accounts: &[AccountInfo], withdraw_lamports: u64) -> Pro
             (meta.lockup, rent_reserve, false)
         }
         StakeStateV2::Uninitialized => {
-            // For Uninitialized, the source account itself must sign
-            let source_key = *source_stake_account_info.key();
-            if !signers_set.contains(&source_key) {
+            // For Uninitialized, require the source account to be a signer
+            if !source_stake_account_info.is_signer() {
                 return Err(ProgramError::MissingRequiredSignature);
             }
             (Lockup::default(), 0u64, false)
@@ -111,6 +124,7 @@ pub fn process_withdraw(accounts: &[AccountInfo], withdraw_lamports: u64) -> Pro
     };
 
     // Lockup must be expired or bypassed by a custodian signer
+    msg!("Withdraw: check lockup");
     if lockup.is_in_force(clock, custodian) {
         return Err(to_program_error(StakeError::LockupInForce));
     }
@@ -118,6 +132,7 @@ pub fn process_withdraw(accounts: &[AccountInfo], withdraw_lamports: u64) -> Pro
     let stake_account_lamports = source_stake_account_info.lamports();
 
     if withdraw_lamports == stake_account_lamports {
+        msg!("Withdraw: full");
         // Full withdrawal: can't close if still staked
         if is_staked {
             return Err(ProgramError::InsufficientFunds);
@@ -125,6 +140,7 @@ pub fn process_withdraw(accounts: &[AccountInfo], withdraw_lamports: u64) -> Pro
         // Deinitialize state upon zero balance
         set_stake_state(source_stake_account_info, &StakeStateV2::Uninitialized)?;
     } else {
+        msg!("Withdraw: partial");
         // Partial withdrawal must not deplete the reserve
         let withdraw_plus_reserve = checked_add(withdraw_lamports, reserve_u64)?;
         if withdraw_plus_reserve > stake_account_lamports {
@@ -133,11 +149,13 @@ pub fn process_withdraw(accounts: &[AccountInfo], withdraw_lamports: u64) -> Pro
     }
 
     // Move lamports after state update
+    msg!("Withdraw: relocate lamports");
     relocate_lamports(
         source_stake_account_info,
         destination_info,
         withdraw_lamports,
     )?;
 
+    msg!("Withdraw: ok");
     Ok(())
 }
