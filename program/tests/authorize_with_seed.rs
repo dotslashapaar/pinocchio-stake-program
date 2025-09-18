@@ -1,3 +1,4 @@
+#![cfg(feature = "seed")]
 mod common;
 use common::*;
 use solana_sdk::{
@@ -197,4 +198,4 @@ async fn authorize_with_seed_staker_success() {
         other => panic!("unexpected state after authorize_with_seed: {:?}", other),
     }
 }
-#![cfg(feature = "seed")]
+
