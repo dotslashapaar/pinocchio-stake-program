@@ -1,10 +1,12 @@
 mod common;
 use common::*;
+use common::pin_adapter as ixn;
 use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
+    instruction::AccountMeta,
     message::Message,
     pubkey::Pubkey,
     system_instruction,
+    stake::state::{Authorized, StakeAuthorize},
 };
 
 #[tokio::test]
@@ -27,12 +29,10 @@ async fn authorize_nonchecked_staker_success() {
     tx.try_sign(&[&ctx.payer, &stake], ctx.last_blockhash).unwrap();
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
-    let init_ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(stake.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
-        AccountMeta::new_readonly(staker.pubkey(), false),
-        AccountMeta::new_readonly(withdrawer.pubkey(), true),
-    ], data: vec![9u8]};
+    let init_ix = ixn::initialize_checked(
+        &stake.pubkey(),
+        &Authorized { staker: staker.pubkey(), withdrawer: withdrawer.pubkey() },
+    );
     let msg = Message::new(&[init_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
@@ -40,14 +40,13 @@ async fn authorize_nonchecked_staker_success() {
 
     // Authorize to new staker; only old staker must sign
     let new_staker = Keypair::new();
-    let mut data = vec![1u8]; // Authorize
-    data.extend_from_slice(&new_staker.pubkey().to_bytes());
-    data.push(0u8); // StakeAuthorize::Staker
-    let ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(stake.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
-        AccountMeta::new_readonly(staker.pubkey(), true), // current staker signer
-    ], data };
+    let ix = ixn::authorize(
+        &stake.pubkey(),
+        &staker.pubkey(),
+        &new_staker.pubkey(),
+        StakeAuthorize::Staker,
+        None,
+    );
     let msg = Message::new(&[ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &staker], ctx.last_blockhash).unwrap();
@@ -85,29 +84,38 @@ async fn authorize_nonchecked_withdrawer_success() {
     tx.try_sign(&[&ctx.payer, &stake], ctx.last_blockhash).unwrap();
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
-    let init_ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(stake.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
-        AccountMeta::new_readonly(staker.pubkey(), false),
-        AccountMeta::new_readonly(withdrawer.pubkey(), true),
-    ], data: vec![9u8]};
+    let init_ix = ixn::initialize_checked(
+        &stake.pubkey(),
+        &Authorized { staker: staker.pubkey(), withdrawer: withdrawer.pubkey() },
+    );
     let msg = Message::new(&[init_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
     let new_withdrawer = Keypair::new();
-    let mut data = vec![1u8];
-    data.extend_from_slice(&new_withdrawer.pubkey().to_bytes());
-    data.push(1u8); // StakeAuthorize::Withdrawer
-    let ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(stake.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
-        AccountMeta::new_readonly(withdrawer.pubkey(), true),
-    ], data };
-    let msg = Message::new(&[ix], Some(&ctx.payer.pubkey()));
-    let mut tx = Transaction::new_unsigned(msg);
-    tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
+    let mut ix = ixn::authorize(
+        &stake.pubkey(),
+        &withdrawer.pubkey(),
+        &new_withdrawer.pubkey(),
+        StakeAuthorize::Withdrawer,
+        None,
+    );
+    // Simulate missing old-authority signature by removing it from metas
+    ix.accounts.retain(|am| am.pubkey != withdrawer.pubkey());
+    // Ensure withdrawer appears as a signer meta (some SDK builders can omit when reordered)
+    let mut ix = ix;
+    if let Some(pos) = ix.accounts.iter().position(|am| am.pubkey == withdrawer.pubkey()) {
+        ix.accounts[pos].is_signer = true;
+    } else {
+        ix.accounts.push(AccountMeta::new_readonly(withdrawer.pubkey(), true));
+    }
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&ctx.payer.pubkey()),
+        &[&ctx.payer, &withdrawer],
+        ctx.last_blockhash,
+    );
     let res = ctx.banks_client.process_transaction(tx).await;
     assert!(res.is_ok(), "Authorize(Withdrawer) should succeed: {:?}", res);
 
@@ -141,12 +149,10 @@ async fn authorize_nonchecked_missing_old_signer_fails() {
     tx.try_sign(&[&ctx.payer, &stake], ctx.last_blockhash).unwrap();
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
-    let init_ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(stake.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
-        AccountMeta::new_readonly(staker.pubkey(), false),
-        AccountMeta::new_readonly(withdrawer.pubkey(), true),
-    ], data: vec![9u8]};
+    let init_ix = ixn::initialize_checked(
+        &stake.pubkey(),
+        &Authorized { staker: staker.pubkey(), withdrawer: withdrawer.pubkey() },
+    );
     let msg = Message::new(&[init_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
@@ -154,14 +160,15 @@ async fn authorize_nonchecked_missing_old_signer_fails() {
 
     // Attempt to change withdrawer but do NOT include current withdrawer signer
     let new_withdrawer = Keypair::new();
-    let mut data = vec![1u8];
-    data.extend_from_slice(&new_withdrawer.pubkey().to_bytes());
-    data.push(1u8);
-    let ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(stake.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
-        // missing current withdrawer signer
-    ], data };
+    let mut ix = ixn::authorize(
+        &stake.pubkey(),
+        &withdrawer.pubkey(),
+        &new_withdrawer.pubkey(),
+        StakeAuthorize::Withdrawer,
+        None,
+    );
+    // Remove all signer flags to simulate missing old-authority signature
+    ix.accounts.iter_mut().for_each(|am| am.is_signer = false);
     let msg = Message::new(&[ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer], ctx.last_blockhash).unwrap();

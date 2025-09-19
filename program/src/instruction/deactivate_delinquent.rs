@@ -13,7 +13,6 @@ use pinocchio::{
 use crate::{
     error::{to_program_error, StakeError},
     helpers::{get_stake_state, next_account_info, set_stake_state},
-    id,
     state::{
         stake_state_v2::StakeStateV2,
         vote_state::vote_program_id,
@@ -68,7 +67,7 @@ pub fn process_deactivate_delinquent(accounts: &[AccountInfo]) -> ProgramResult 
 
     // --- 3) Load stake state, verify delegation target, deactivate if eligible ---
     match get_stake_state(stake_ai)? {
-        StakeStateV2::Stake(mut meta, mut stake, flags) => {
+        StakeStateV2::Stake(meta, mut stake, flags) => {
             if stake.delegation.voter_pubkey != *delinquent_vote_ai.key() {
                 return Err(to_program_error(StakeError::VoteAddressMismatch));
             }

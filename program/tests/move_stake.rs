@@ -1,10 +1,11 @@
 mod common;
 use common::*;
+use common::pin_adapter as ixn;
 use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
     message::Message,
     pubkey::Pubkey,
     system_instruction,
+    stake::state::Authorized,
 };
 use std::str::FromStr;
 
@@ -45,12 +46,10 @@ async fn setup_active_stake(
     tx.try_sign(&[&ctx.payer, &kp], ctx.last_blockhash).unwrap();
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
-    let init_ix = Instruction { program_id: *program_id, accounts: vec![
-        AccountMeta::new(kp.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
-        AccountMeta::new_readonly(staker.pubkey(), false),
-        AccountMeta::new_readonly(withdrawer.pubkey(), true),
-    ], data: vec![9u8]};
+    let init_ix = ixn::initialize_checked(
+        &kp.pubkey(),
+        &Authorized { staker: staker.pubkey(), withdrawer: withdrawer.pubkey() },
+    );
     let msg = Message::new(&[init_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, withdrawer], ctx.last_blockhash).unwrap();
@@ -66,14 +65,7 @@ async fn setup_active_stake(
         ctx.banks_client.process_transaction(fund_tx).await.unwrap();
     }
 
-    let del_ix = Instruction { program_id: *program_id, accounts: vec![
-        AccountMeta::new(kp.pubkey(), false),
-        AccountMeta::new_readonly(*vote_pubkey, false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
-        AccountMeta::new_readonly(staker.pubkey(), true),
-    ], data: vec![2u8]};
+    let del_ix = ixn::delegate_stake(&kp.pubkey(), &staker.pubkey(), vote_pubkey);
     let msg = Message::new(&[del_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, staker], ctx.last_blockhash).unwrap();
@@ -115,13 +107,7 @@ async fn move_stake_between_active_same_vote() {
     let src_before = ctx.banks_client.get_account(source.pubkey()).await.unwrap().unwrap();
     let dst_before = ctx.banks_client.get_account(dest.pubkey()).await.unwrap().unwrap();
 
-    let mut data = vec![16u8]; // MoveStake discriminant
-    data.extend_from_slice(&amount.to_le_bytes());
-    let ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(source.pubkey(), false),
-        AccountMeta::new(dest.pubkey(), false),
-        AccountMeta::new_readonly(staker.pubkey(), true),
-    ], data };
+    let ix = ixn::move_stake(&source.pubkey(), &dest.pubkey(), &staker.pubkey(), amount);
     let msg = Message::new(&[ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &staker], ctx.last_blockhash).unwrap();
@@ -177,12 +163,10 @@ async fn move_stake_to_inactive_destination_success() {
     tx.try_sign(&[&ctx.payer, &source], ctx.last_blockhash).unwrap();
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
-    let init_src = Instruction { program_id, accounts: vec![
-        AccountMeta::new(source.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
-        AccountMeta::new_readonly(staker.pubkey(), false),
-        AccountMeta::new_readonly(withdrawer.pubkey(), true),
-    ], data: vec![9u8]};
+    let init_src = ixn::initialize_checked(
+        &source.pubkey(),
+        &Authorized { staker: staker.pubkey(), withdrawer: withdrawer.pubkey() },
+    );
     let msg = Message::new(&[init_src], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
@@ -197,14 +181,7 @@ async fn move_stake_to_inactive_destination_success() {
     );
     ctx.banks_client.process_transaction(fund_tx).await.unwrap();
 
-    let del_src = Instruction { program_id, accounts: vec![
-        AccountMeta::new(source.pubkey(), false),
-        AccountMeta::new_readonly(vote.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
-        AccountMeta::new_readonly(staker.pubkey(), true),
-    ], data: vec![2u8]};
+    let del_src = ixn::delegate_stake(&source.pubkey(), &staker.pubkey(), &vote.pubkey());
     let msg = Message::new(&[del_src], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &staker], ctx.last_blockhash).unwrap();
@@ -218,12 +195,10 @@ async fn move_stake_to_inactive_destination_success() {
     tx.try_sign(&[&ctx.payer, &dest], ctx.last_blockhash).unwrap();
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
-    let init_dest = Instruction { program_id, accounts: vec![
-        AccountMeta::new(dest.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
-        AccountMeta::new_readonly(staker.pubkey(), false),
-        AccountMeta::new_readonly(withdrawer.pubkey(), true),
-    ], data: vec![9u8]};
+    let init_dest = ixn::initialize_checked(
+        &dest.pubkey(),
+        &Authorized { staker: staker.pubkey(), withdrawer: withdrawer.pubkey() },
+    );
     let msg = Message::new(&[init_dest], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
@@ -242,13 +217,7 @@ async fn move_stake_to_inactive_destination_success() {
     let src_before = ctx.banks_client.get_account(source.pubkey()).await.unwrap().unwrap();
     let dst_before = ctx.banks_client.get_account(dest.pubkey()).await.unwrap().unwrap();
 
-    let mut data = vec![16u8];
-    data.extend_from_slice(&amount.to_le_bytes());
-    let ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(source.pubkey(), false),
-        AccountMeta::new(dest.pubkey(), false),
-        AccountMeta::new_readonly(staker.pubkey(), true),
-    ], data };
+    let ix = ixn::move_stake(&source.pubkey(), &dest.pubkey(), &staker.pubkey(), amount);
     let msg = Message::new(&[ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &staker], ctx.last_blockhash).unwrap();
@@ -290,13 +259,7 @@ async fn move_stake_vote_mismatch_fails() {
 
     // Attempt move -> should fail due to vote mismatch
     let amount = 100_000u64;
-    let mut data = vec![16u8];
-    data.extend_from_slice(&amount.to_le_bytes());
-    let ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(source.pubkey(), false),
-        AccountMeta::new(dest.pubkey(), false),
-        AccountMeta::new_readonly(staker.pubkey(), true),
-    ], data };
+    let ix = ixn::move_stake(&source.pubkey(), &dest.pubkey(), &staker.pubkey(), amount);
     let msg = Message::new(&[ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &staker], ctx.last_blockhash).unwrap();
@@ -326,13 +289,7 @@ async fn move_stake_zero_amount_fails() {
     let dest = setup_active_stake(&mut ctx, &program_id, &staker, &withdrawer, &vote_pk, 1_000_000).await;
 
     // Attempt amount=0 -> InvalidArgument
-    let mut data = vec![16u8];
-    data.extend_from_slice(&0u64.to_le_bytes());
-    let ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(source.pubkey(), false),
-        AccountMeta::new(dest.pubkey(), false),
-        AccountMeta::new_readonly(staker.pubkey(), true),
-    ], data };
+    let ix = ixn::move_stake(&source.pubkey(), &dest.pubkey(), &staker.pubkey(), 0);
     let msg = Message::new(&[ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &staker], ctx.last_blockhash).unwrap();

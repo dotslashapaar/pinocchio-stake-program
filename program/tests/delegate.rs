@@ -1,10 +1,11 @@
 mod common;
 use common::*;
+use common::pin_adapter as ixn;
 use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
     message::Message,
     pubkey::Pubkey,
     system_instruction,
+    stake::state::Authorized,
 };
 use std::str::FromStr;
 
@@ -59,16 +60,10 @@ async fn delegate_stake_success_sets_state_and_amount() {
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
     // InitializeChecked
-    let init_ix = Instruction {
-        program_id,
-        accounts: vec![
-            AccountMeta::new(stake.pubkey(), false),
-            AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
-            AccountMeta::new_readonly(staker.pubkey(), false),
-            AccountMeta::new_readonly(withdrawer.pubkey(), true),
-        ],
-        data: vec![9u8],
-    };
+    let init_ix = ixn::initialize_checked(
+        &stake.pubkey(),
+        &Authorized { staker: staker.pubkey(), withdrawer: withdrawer.pubkey() },
+    );
     let msg = Message::new(&[init_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
@@ -93,18 +88,7 @@ async fn delegate_stake_success_sets_state_and_amount() {
     create_dummy_vote_account(&mut ctx, &vote_acc).await;
 
     // Delegate
-    let del_ix = Instruction {
-        program_id,
-        accounts: vec![
-            AccountMeta::new(stake.pubkey(), false),
-            AccountMeta::new_readonly(vote_acc.pubkey(), false),
-            AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
-            AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
-            AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false), // stake_config placeholder
-            AccountMeta::new_readonly(staker.pubkey(), true),
-        ],
-        data: vec![2u8],
-    };
+    let del_ix = ixn::delegate_stake(&stake.pubkey(), &staker.pubkey(), &vote_acc.pubkey());
     let msg = Message::new(&[del_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &staker], ctx.last_blockhash).unwrap();

@@ -1,6 +1,7 @@
 mod common;
 use common::*;
-use solana_sdk::{instruction::{AccountMeta, Instruction}, pubkey::Pubkey, system_instruction, message::Message};
+use common::pin_adapter as ixn;
+use solana_sdk::{pubkey::Pubkey, system_instruction, message::Message, stake::state::Authorized};
 use std::str::FromStr;
 
 #[tokio::test]
@@ -33,20 +34,7 @@ async fn withdraw_uninitialized_partial() {
 
     // Withdraw some lamports to payer using Uninitialized fast path
     let withdraw_lamports: u64 = 500_000;
-    let mut data = vec![4u8]; // Withdraw discriminant
-    data.extend_from_slice(&withdraw_lamports.to_le_bytes());
-    let w_ix = Instruction {
-        program_id,
-        accounts: vec![
-            AccountMeta::new(stake_acc.pubkey(), false),
-            AccountMeta::new(ctx.payer.pubkey(), false),
-            AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
-            AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
-            // Authority = source account (Uninitialized flow)
-            AccountMeta::new_readonly(stake_acc.pubkey(), true),
-        ],
-        data,
-    };
+    let w_ix = ixn::withdraw(&stake_acc.pubkey(), &stake_acc.pubkey(), &ctx.payer.pubkey(), withdraw_lamports, None);
     let msg = Message::new(&[w_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &stake_acc], ctx.last_blockhash).unwrap();
@@ -76,12 +64,7 @@ async fn withdraw_initialized_partial_respects_reserve() {
     tx.try_sign(&[&ctx.payer, &stake_acc], ctx.last_blockhash).unwrap();
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
-    let init_ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(stake_acc.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
-        AccountMeta::new_readonly(staker.pubkey(), false),
-        AccountMeta::new_readonly(withdrawer.pubkey(), true),
-    ], data: vec![9u8]};
+    let init_ix = ixn::initialize_checked(&stake_acc.pubkey(), &Authorized { staker: staker.pubkey(), withdrawer: withdrawer.pubkey() });
     let msg = Message::new(&[init_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
@@ -99,15 +82,7 @@ async fn withdraw_initialized_partial_respects_reserve() {
 
     // Withdraw less than extra, ensure reserve stays
     let withdraw_lamports: u64 = extra / 2;
-    let mut data = vec![4u8];
-    data.extend_from_slice(&withdraw_lamports.to_le_bytes());
-    let ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(stake_acc.pubkey(), false),
-        AccountMeta::new(ctx.payer.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
-        AccountMeta::new_readonly(withdrawer.pubkey(), true),
-    ], data };
+    let ix = ixn::withdraw(&stake_acc.pubkey(), &withdrawer.pubkey(), &ctx.payer.pubkey(), withdraw_lamports, None);
     let msg = Message::new(&[ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
@@ -143,12 +118,10 @@ async fn withdraw_initialized_full_closes_account() {
     tx.try_sign(&[&ctx.payer, &stake_acc], ctx.last_blockhash).unwrap();
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
-    let init_ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(stake_acc.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
-        AccountMeta::new_readonly(staker.pubkey(), false),
-        AccountMeta::new_readonly(withdrawer.pubkey(), true),
-    ], data: vec![9u8]};
+    let init_ix = ixn::initialize_checked(
+        &stake_acc.pubkey(),
+        &Authorized { staker: staker.pubkey(), withdrawer: withdrawer.pubkey() },
+    );
     let msg = Message::new(&[init_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
@@ -157,15 +130,7 @@ async fn withdraw_initialized_full_closes_account() {
     // Full withdraw: exactly current lamports
     let acct_before = ctx.banks_client.get_account(stake_acc.pubkey()).await.unwrap().unwrap();
     let full = acct_before.lamports;
-    let mut data = vec![4u8];
-    data.extend_from_slice(&full.to_le_bytes());
-    let ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(stake_acc.pubkey(), false),
-        AccountMeta::new(ctx.payer.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
-        AccountMeta::new_readonly(withdrawer.pubkey(), true),
-    ], data };
+    let ix = ixn::withdraw(&stake_acc.pubkey(), &withdrawer.pubkey(), &ctx.payer.pubkey(), full, None);
     let msg = Message::new(&[ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
@@ -203,12 +168,10 @@ async fn withdraw_stake_active_fails_partial() {
     tx.try_sign(&[&ctx.payer, &stake], ctx.last_blockhash).unwrap();
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
-    let init_ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(stake.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
-        AccountMeta::new_readonly(staker.pubkey(), false),
-        AccountMeta::new_readonly(withdrawer.pubkey(), true),
-    ], data: vec![9u8]};
+    let init_ix = ixn::initialize_checked(
+        &stake.pubkey(),
+        &Authorized { staker: staker.pubkey(), withdrawer: withdrawer.pubkey() },
+    );
     let msg = Message::new(&[init_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
@@ -236,14 +199,7 @@ async fn withdraw_stake_active_fails_partial() {
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
     // Delegate
-    let del_ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(stake.pubkey(), false),
-        AccountMeta::new_readonly(vote.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
-        AccountMeta::new_readonly(staker.pubkey(), true),
-    ], data: vec![2u8] };
+    let del_ix = ixn::delegate_stake(&stake.pubkey(), &staker.pubkey(), &vote.pubkey());
     let msg = Message::new(&[del_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &staker], ctx.last_blockhash).unwrap();
@@ -251,15 +207,7 @@ async fn withdraw_stake_active_fails_partial() {
 
     // Attempt partial withdraw while still active -> should fail
     let attempt: u64 = 1_000; // any positive amount should fail under active constraints
-    let mut data = vec![4u8];
-    data.extend_from_slice(&attempt.to_le_bytes());
-    let ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(stake.pubkey(), false),
-        AccountMeta::new(ctx.payer.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
-        AccountMeta::new_readonly(withdrawer.pubkey(), true),
-    ], data };
+    let ix = ixn::withdraw(&stake.pubkey(), &withdrawer.pubkey(), &ctx.payer.pubkey(), attempt, None);
     let msg = Message::new(&[ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
@@ -289,12 +237,10 @@ async fn withdraw_stake_after_deactivate_full_succeeds() {
     tx.try_sign(&[&ctx.payer, &stake], ctx.last_blockhash).unwrap();
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
-    let init_ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(stake.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
-        AccountMeta::new_readonly(staker.pubkey(), false),
-        AccountMeta::new_readonly(withdrawer.pubkey(), true),
-    ], data: vec![9u8]};
+    let init_ix = ixn::initialize_checked(
+        &stake.pubkey(),
+        &Authorized { staker: staker.pubkey(), withdrawer: withdrawer.pubkey() },
+    );
     let msg = Message::new(&[init_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
@@ -320,25 +266,14 @@ async fn withdraw_stake_after_deactivate_full_succeeds() {
     tx.try_sign(&[&ctx.payer, &vote], ctx.last_blockhash).unwrap();
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
-    let del_ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(stake.pubkey(), false),
-        AccountMeta::new_readonly(vote.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
-        AccountMeta::new_readonly(staker.pubkey(), true),
-    ], data: vec![2u8] };
+    let del_ix = ixn::delegate_stake(&stake.pubkey(), &staker.pubkey(), &vote.pubkey());
     let msg = Message::new(&[del_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &staker], ctx.last_blockhash).unwrap();
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
     // Deactivate
-    let deact_ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(stake.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
-        AccountMeta::new_readonly(staker.pubkey(), true),
-    ], data: vec![5u8]};
+    let deact_ix = ixn::deactivate_stake(&stake.pubkey(), &staker.pubkey());
     let msg = Message::new(&[deact_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &staker], ctx.last_blockhash).unwrap();
@@ -352,15 +287,7 @@ async fn withdraw_stake_after_deactivate_full_succeeds() {
     // Full withdraw now succeeds
     let current = ctx.banks_client.get_account(stake.pubkey()).await.unwrap().unwrap();
     let full = current.lamports;
-    let mut data = vec![4u8];
-    data.extend_from_slice(&full.to_le_bytes());
-    let ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(stake.pubkey(), false),
-        AccountMeta::new(ctx.payer.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
-        AccountMeta::new_readonly(withdrawer.pubkey(), true),
-    ], data };
+    let ix = ixn::withdraw(&stake.pubkey(), &withdrawer.pubkey(), &ctx.payer.pubkey(), full, None);
     let msg = Message::new(&[ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();

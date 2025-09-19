@@ -36,6 +36,9 @@ pub fn program_test_without_features(feature_ids: &[Pubkey]) -> ProgramTest {
     pt
 }
 
+// Shared adapter for instruction translation + state helpers
+pub mod pin_adapter;
+
 pub async fn refresh_blockhash(ctx: &mut ProgramTestContext) {
     ctx.last_blockhash = ctx
         .banks_client
@@ -52,4 +55,12 @@ pub async fn transfer(ctx: &mut ProgramTestContext, recipient: &Pubkey, amount: 
         ctx.last_blockhash,
     );
     ctx.banks_client.process_transaction(tx).await.unwrap();
+}
+
+// Native baseline: do not override the builtin Stake program
+pub fn program_test_native() -> ProgramTest {
+    let mut pt = ProgramTest::default();
+    pt.prefer_bpf(true);
+    pt.set_compute_max_units(1_000_000);
+    pt
 }

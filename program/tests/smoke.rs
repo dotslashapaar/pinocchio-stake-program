@@ -1,5 +1,6 @@
 mod common;
-use solana_sdk::{instruction::Instruction, pubkey::Pubkey, signer::Signer, transaction::Transaction};
+use common::pin_adapter as ixn;
+use solana_sdk::{pubkey::Pubkey, signer::Signer, transaction::Transaction};
 
 #[tokio::test]
 async fn smoke_get_minimum_delegation() {
@@ -11,8 +12,8 @@ async fn smoke_get_minimum_delegation() {
 
     let mut ctx = pt.start_with_context().await;
 
-    // 2) Build the instruction for GetMinimumDelegation (disc=13), no accounts
-    let ix = Instruction { program_id, accounts: vec![], data: vec![13u8] };
+    // 2) Build the instruction for GetMinimumDelegation via adapter
+    let ix = ixn::get_minimum_delegation();
 
     // 3) Simulate and read return_data (u64 LE)
     let tx = Transaction::new_signed_with_payer(

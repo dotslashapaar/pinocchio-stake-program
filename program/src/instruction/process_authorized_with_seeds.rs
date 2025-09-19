@@ -12,63 +12,23 @@ use crate::{
     state::{
         accounts::AuthorizeWithSeedData,
         stake_state_v2::StakeStateV2,
-        StakeAuthorize,
     },
 };
 
 
-// Definition: sha256(base || seed || owner)
-fn derive_with_seed_compat(
-    base: &Pubkey,
-    seed: &[u8],
-    owner: &Pubkey,
-) -> Result<Pubkey, ProgramError> {
-    // Enforce max seed length 32 bytes for `create_with_seed`
-    if seed.len() > 32 {
-        return Err(ProgramError::InvalidInstructionData);
-    }
-
-    // Concatenate base || seed || owner into a fixed buffer (max 96 bytes)
-    let mut buf = [0u8; 32 + 32 + 32];
-    let mut off = 0usize;
-
-    // base (32)
-    buf[off..off + 32].copy_from_slice(&base[..]);
-    off += 32;
-
-    // seed (<= 32)
-    buf[off..off + seed.len()].copy_from_slice(seed);
-    off += seed.len();
-
-    // owner (32)
-    buf[off..off + 32].copy_from_slice(&owner[..]);
-    off += 32;
-
-    // sha256(buf[..off]) -> 32 bytes
-    let mut out = [0u8; 32];
-    // Call syscall directly
-    let rc = unsafe {
-        pinocchio::syscalls::sol_sha256(buf.as_ptr(), off as u64, out.as_mut_ptr())
-    };
-    const SUCCESS: u64 = 0;
-    if rc != SUCCESS {
-        return Err(ProgramError::InvalidInstructionData);
-    }
-
-    Ok(out)
-}
 
 pub fn process_authorized_with_seeds(
     accounts: &[AccountInfo],
     args: AuthorizeWithSeedData, // already has: new_authorized, stake_authorize, authority_seed, authority_owner
 ) -> ProgramResult { 
+    let role = args.stake_authorize;
     // Required accounts: stake, base, clock (optional custodian)
     if accounts.len() < 3 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
 
     // stake, base, clock, [maybe custodian, ...]
-    let [stake_ai, base_ai, clock_ai, rest @ ..] = accounts else {
+    let [stake_ai, _base_ai, clock_ai, rest @ ..] = accounts else {
         return Err(ProgramError::InvalidAccountData);
     };
 
@@ -80,30 +40,18 @@ pub fn process_authorized_with_seeds(
         return Err(ProgramError::InvalidArgument);
     }
 
-    // Load clock
-    let clock = unsafe { Clock::from_account_info_unchecked(clock_ai)? };
+    // Load clock (safe)
+    let clock = Clock::from_account_info(clock_ai)?;
 
     // Optional lockup custodian account (pass-through to policy)
     let maybe_lockup_authority: Option<&AccountInfo> = rest.first();
 
    
-    // Build the signer set
+    // Build the signer set (include all tx signers). Base signer is sufficient
+    // to satisfy policy for non-checked variant (old authority may change it).
     let mut signers_buf = [Pubkey::default(); MAXIMUM_SIGNERS];
     let mut n = collect_signers(accounts, &mut signers_buf)?;
-    let mut push_signer = |pk: Pubkey| -> Result<(), ProgramError> {
-        if n >= MAXIMUM_SIGNERS {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-        signers_buf[n] = pk;
-        n += 1;
-        Ok(())
-    };
-
-    // If the base signed, include the derived address (create_with_seed) in the signer set
-    if base_ai.is_signer() {
-        let derived = derive_with_seed_compat(base_ai.key(), args.authority_seed, &args.authority_owner)?;
-        push_signer(derived)?;
-    }
+    // No extra augmentation needed
 
     // Final signer slice we pass to the policy
     let signers = &signers_buf[..n];
@@ -114,7 +62,7 @@ pub fn process_authorized_with_seeds(
             authorize_update(
                 &mut meta,
                 args.new_authorized,
-                args.stake_authorize,
+                role,
                 signers,
                 maybe_lockup_authority,
                 &clock,
@@ -125,7 +73,7 @@ pub fn process_authorized_with_seeds(
             authorize_update(
                 &mut meta,
                 args.new_authorized,
-                args.stake_authorize,
+                role,
                 signers,
                 maybe_lockup_authority,
                 &clock,

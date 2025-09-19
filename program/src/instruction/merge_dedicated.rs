@@ -14,7 +14,7 @@ use pinocchio::{
     account_info::AccountInfo,
     program_error::ProgramError,
     pubkey::Pubkey,
-    sysvars::{clock::Clock, Sysvar},
+    sysvars::clock::Clock,
     ProgramResult,
 };
 

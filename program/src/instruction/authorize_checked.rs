@@ -59,8 +59,25 @@ pub fn process_authorize_checked(
     // New authority comes from the 4th account (not from instruction data in the checked variant)
     let new_authorized: Pubkey = *new_auth_ai.key();
 
+    // Enforce that the old authority (account 2) signed and matches current meta
+    let state = get_stake_state(stake_ai)?;
+    let required_old = match &state {
+        StakeStateV2::Initialized(meta) => match authority_type {
+            StakeAuthorize::Staker => meta.authorized.staker,
+            StakeAuthorize::Withdrawer => meta.authorized.withdrawer,
+        },
+        StakeStateV2::Stake(meta, _, _) => match authority_type {
+            StakeAuthorize::Staker => meta.authorized.staker,
+            StakeAuthorize::Withdrawer => meta.authorized.withdrawer,
+        },
+        _ => return Err(ProgramError::InvalidAccountData),
+    };
+    if _old_auth_ai.key() != &required_old || !_old_auth_ai.is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+
     // Load -> authorize -> store
-    match get_stake_state(stake_ai)? {
+    match state {
         StakeStateV2::Initialized(mut meta) => {
             authorize_update(
                 &mut meta,

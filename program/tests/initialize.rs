@@ -1,6 +1,6 @@
 mod common;
 use common::*;
-use solana_sdk::instruction::Instruction;
+use common::pin_adapter as ixn;
 use solana_sdk::pubkey::Pubkey;
 
 #[tokio::test]
@@ -10,7 +10,7 @@ async fn initialize_harness_boots() {
     let mut ctx = pt.start_with_context().await;
 
     let program_id = Pubkey::new_from_array(pinocchio_stake::ID);
-    let ix = Instruction { program_id, accounts: vec![], data: vec![13u8] };
+    let ix = ixn::get_minimum_delegation();
 
     let tx = Transaction::new_signed_with_payer(&[ix], Some(&ctx.payer.pubkey()), &[&ctx.payer], ctx.last_blockhash);
     let sim = ctx.banks_client.simulate_transaction(tx).await.unwrap();

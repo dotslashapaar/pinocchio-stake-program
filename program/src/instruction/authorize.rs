@@ -5,11 +5,11 @@ use pinocchio::{
 
 use crate::{
     helpers::{collect_signers, get_stake_state, set_stake_state, MAXIMUM_SIGNERS},
-    state::{accounts::AuthorizeData, stake_state_v2::StakeStateV2, StakeAuthorize},
+    state::{stake_state_v2::StakeStateV2, StakeAuthorize},
 };
 use crate::helpers::authorize_update; 
 
-fn parse_authorize_data(data: &[u8]) -> Result<AuthorizeData, ProgramError> {
+/*fn parse_authorize_data(data: &[u8]) -> Result<AuthorizeData, ProgramError> {
     if data.len() != 33 { return Err(ProgramError::InvalidInstructionData); }
     let new_authorized =
         Pubkey::try_from(&data[0..32]).map_err(|_| ProgramError::InvalidInstructionData)?;
@@ -19,7 +19,7 @@ fn parse_authorize_data(data: &[u8]) -> Result<AuthorizeData, ProgramError> {
         _ => return Err(ProgramError::InvalidInstructionData),
     };
     Ok(AuthorizeData { new_authorized, stake_authorize })
-}
+}*/
 
 pub fn process_authorize(
     accounts: &[AccountInfo],
@@ -45,7 +45,7 @@ pub fn process_authorize(
     let maybe_lockup_authority: Option<&AccountInfo> = rest.first();
 
     // Collect all signers
-    let mut signers_buf = [Pubkey::default(); MAXIMUM_SIGNERS];
+    let mut signers_buf = [Pubkey::default(); MAXIMUM_SIGNERS];// Stack allocated
     let n = collect_signers(accounts, &mut signers_buf)?;
     let signers = &signers_buf[..n];
 
