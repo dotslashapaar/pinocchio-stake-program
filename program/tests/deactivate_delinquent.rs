@@ -1,6 +1,7 @@
 
 mod common;
 use common::*;
+use common::pin_adapter as ixn;
 use solana_sdk::{
     account::Account as SolanaAccount,
     instruction::{AccountMeta, Instruction},
@@ -41,7 +42,7 @@ async fn deactivate_delinquent_happy_path() {
         SolanaAccount {
             lamports: 1_000_000,
             data: reference_votes,
-            owner: solana_sdk::system_program::id(),
+            owner: solana_sdk::vote::program::id(),
             executable: false,
             rent_epoch: 0,
         },
@@ -51,7 +52,7 @@ async fn deactivate_delinquent_happy_path() {
         SolanaAccount {
             lamports: 1_000_000,
             data: delinquent_votes,
-            owner: solana_sdk::system_program::id(),
+            owner: solana_sdk::vote::program::id(),
             executable: false,
             rent_epoch: 0,
         },
@@ -65,6 +66,23 @@ async fn deactivate_delinquent_happy_path() {
     let first_normal = ctx.genesis_config().epoch_schedule.first_normal_slot;
     let target_slot = first_normal + slots_per_epoch * 5 + 1;
     ctx.warp_to_slot(target_slot).unwrap();
+
+    // Rewrite vote accounts' data to align with the actual current epoch
+    let clock = ctx.banks_client.get_sysvar::<solana_sdk::clock::Clock>().await.unwrap();
+    let n = pinocchio_stake::helpers::constant::MINIMUM_DELINQUENT_EPOCHS_FOR_DEACTIVATION;
+    let start = clock.epoch.saturating_sub(n - 1);
+    let mut seq = Vec::with_capacity(n as usize);
+    for e in start..=clock.epoch { seq.push((e, 1, 0)); }
+    let updated_ref = build_epoch_credits_bytes(&seq);
+    let updated_del = build_epoch_credits_bytes(&[(clock.epoch.saturating_sub(n), 1, 0)]);
+
+    // Update accounts in banks
+    let mut acc = ctx.banks_client.get_account(reference_vote).await.unwrap().unwrap();
+    acc.data = updated_ref;
+    ctx.set_account(&reference_vote, &acc.into());
+    let mut acc2 = ctx.banks_client.get_account(delinquent_vote).await.unwrap().unwrap();
+    acc2.data = updated_del;
+    ctx.set_account(&delinquent_vote, &acc2.into());
 
     // Create stake account and initialize authorities
     let staker = Keypair::new();
@@ -128,16 +146,8 @@ async fn deactivate_delinquent_happy_path() {
     tx.try_sign(&[&ctx.payer, &staker], ctx.last_blockhash).unwrap();
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
-    // Now call DeactivateDelinquent: [stake, delinquent_vote, reference_vote]
-    let dd_ix = Instruction {
-        program_id,
-        accounts: vec![
-            AccountMeta::new(stake.pubkey(), false),
-            AccountMeta::new_readonly(delinquent_vote, false),
-            AccountMeta::new_readonly(reference_vote, false),
-        ],
-        data: vec![14u8],
-    };
+    // Now call DeactivateDelinquent via adapter
+    let dd_ix = ixn::deactivate_delinquent(&stake.pubkey(), &delinquent_vote, &reference_vote);
     let msg = Message::new(&[dd_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     // No signer required by this instruction

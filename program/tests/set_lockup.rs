@@ -1,10 +1,14 @@
 mod common;
 use common::*;
+use common::pin_adapter as ixn;
 use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
     message::Message,
     pubkey::Pubkey,
     system_instruction,
+    stake::{
+        instruction::LockupArgs,
+        state::Authorized,
+    },
 };
 
 // SetLockupChecked: when lockup not in force, withdrawer must sign and epoch/timestamp updates apply.
@@ -35,17 +39,11 @@ async fn set_lockup_checked_updates_epoch_with_withdrawer_signature() {
     tx.try_sign(&[&ctx.payer, &stake_acc], ctx.last_blockhash).unwrap();
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
-    // InitializeChecked: set staker/withdrawer; withdrawer must sign
-    let init_ix = Instruction {
-        program_id,
-        accounts: vec![
-            AccountMeta::new(stake_acc.pubkey(), false),
-            AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
-            AccountMeta::new_readonly(staker.pubkey(), false),
-            AccountMeta::new_readonly(withdrawer.pubkey(), true),
-        ],
-        data: vec![9u8], // InitializeChecked discriminant
-    };
+    // InitializeChecked via adapter
+    let init_ix = ixn::initialize_checked(
+        &stake_acc.pubkey(),
+        &Authorized { staker: staker.pubkey(), withdrawer: withdrawer.pubkey() },
+    );
     let msg = Message::new(&[init_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
@@ -53,20 +51,9 @@ async fn set_lockup_checked_updates_epoch_with_withdrawer_signature() {
 
     // SetLockupChecked: update only the epoch (flag 0x02)
     let new_epoch: u64 = 5;
-    let mut data = vec![12u8]; // SetLockupChecked discriminant
-    data.push(0x02); // flags: epoch present
-    data.extend_from_slice(&new_epoch.to_le_bytes());
-
-    let ix = Instruction {
-        program_id,
-        accounts: vec![
-            AccountMeta::new(stake_acc.pubkey(), false),
-            // Include withdrawer as signer in the tx (collect_signers sees it)
-            AccountMeta::new_readonly(withdrawer.pubkey(), true),
-            // No new custodian passed (index 2) -> custodian unchanged
-        ],
-        data,
-    };
+    let args = LockupArgs { unix_timestamp: None, epoch: Some(new_epoch), custodian: None };
+    let mut ix = ixn::set_lockup_checked(&stake_acc.pubkey(), &args, &withdrawer.pubkey());
+    // Ensure withdrawer signer is present in metas (sdk builder adds it)
     let msg = Message::new(&[ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
@@ -123,16 +110,10 @@ async fn set_lockup_checked_custodian_in_force() {
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
     // InitializeChecked
-    let init_ix = Instruction {
-        program_id,
-        accounts: vec![
-            AccountMeta::new(stake_acc.pubkey(), false),
-            AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
-            AccountMeta::new_readonly(staker.pubkey(), false),
-            AccountMeta::new_readonly(withdrawer.pubkey(), true),
-        ],
-        data: vec![9u8],
-    };
+    let init_ix = ixn::initialize_checked(
+        &stake_acc.pubkey(),
+        &Authorized { staker: staker.pubkey(), withdrawer: withdrawer.pubkey() },
+    );
     let msg = Message::new(&[init_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
@@ -140,18 +121,8 @@ async fn set_lockup_checked_custodian_in_force() {
 
     // First, set lockup to be IN FORCE and set custodian (withdrawer signature sufficient when not in force)
     let future_epoch: u64 = ctx.banks_client.get_sysvar::<solana_sdk::clock::Clock>().await.unwrap().epoch + 10;
-    let mut data = vec![12u8]; // SetLockupChecked
-    data.push(0x02 | 0x00); // only epoch present
-    data.extend_from_slice(&future_epoch.to_le_bytes());
-    let ix = Instruction {
-        program_id,
-        accounts: vec![
-            AccountMeta::new(stake_acc.pubkey(), false),
-            AccountMeta::new_readonly(withdrawer.pubkey(), true), // withdrawer signs (not in force yet)
-            AccountMeta::new_readonly(custodian.pubkey(), true),  // set custodian; must be signer if provided
-        ],
-        data,
-    };
+    let args = LockupArgs { unix_timestamp: None, epoch: Some(future_epoch), custodian: Some(custodian.pubkey()) };
+    let ix = ixn::set_lockup_checked(&stake_acc.pubkey(), &args, &withdrawer.pubkey());
     let msg = Message::new(&[ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &withdrawer, &custodian], ctx.last_blockhash).unwrap();
@@ -171,17 +142,8 @@ async fn set_lockup_checked_custodian_in_force() {
     // Now lockup is in force -> only custodian signature should be required.
     // Attempt to change unix_timestamp while passing ONLY custodian as signer.
     let new_ts: i64 = 1234567890;
-    let mut data2 = vec![12u8];
-    data2.push(0x01); // timestamp present
-    data2.extend_from_slice(&new_ts.to_le_bytes());
-    let ix2 = Instruction {
-        program_id,
-        accounts: vec![
-            AccountMeta::new(stake_acc.pubkey(), false),
-            AccountMeta::new_readonly(custodian.pubkey(), true), // signer set includes custodian
-        ],
-        data: data2,
-    };
+    let args2 = LockupArgs { unix_timestamp: Some(new_ts), epoch: None, custodian: None };
+    let ix2 = ixn::set_lockup_checked(&stake_acc.pubkey(), &args2, &custodian.pubkey());
     let msg = Message::new(&[ix2], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &custodian], ctx.last_blockhash).unwrap();
@@ -199,4 +161,3 @@ async fn set_lockup_checked_custodian_in_force() {
     }
     assert_eq!(meta.lockup.unix_timestamp, new_ts);
 }
-

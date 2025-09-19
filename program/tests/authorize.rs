@@ -1,8 +1,9 @@
 mod common;
 use common::*;
-use solana_sdk::instruction::Instruction;
+use common::pin_adapter as ixn;
+use solana_sdk::stake::state::Authorized;
 use solana_sdk::pubkey::Pubkey;
-use solana_sdk::{instruction::AccountMeta, system_instruction, sysvar, message::Message};
+use solana_sdk::{system_instruction, message::Message};
 
 #[tokio::test]
 async fn authorize_harness_boots() {
@@ -10,7 +11,7 @@ async fn authorize_harness_boots() {
     let mut ctx = pt.start_with_context().await;
     let program_id = Pubkey::new_from_array(pinocchio_stake::ID);
 
-    let ix = Instruction { program_id, accounts: vec![], data: vec![13u8] };
+    let ix = ixn::get_minimum_delegation();
     let tx = Transaction::new_signed_with_payer(&[ix], Some(&ctx.payer.pubkey()), &[&ctx.payer], ctx.last_blockhash);
     let sim = ctx.banks_client.simulate_transaction(tx).await.unwrap();
     assert!(sim.simulation_details.unwrap().return_data.is_some());
@@ -43,17 +44,9 @@ async fn authorize_checked_staker_success() {
     tx.try_sign(&[&ctx.payer, &stake_account], ctx.last_blockhash).unwrap();
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
-    // InitializeChecked: withdrawer must sign; staker is provided as account
-    let init_ix = Instruction {
-        program_id,
-        accounts: vec![
-            AccountMeta::new(stake_account.pubkey(), false),
-            AccountMeta::new_readonly(sysvar::rent::id(), false),
-            AccountMeta::new_readonly(staker.pubkey(), false),
-            AccountMeta::new_readonly(withdrawer.pubkey(), true),
-        ],
-        data: vec![9u8],
-    };
+    // InitializeChecked via adapter: withdrawer must sign; staker provided as account
+    let auth = Authorized { staker: staker.pubkey(), withdrawer: withdrawer.pubkey() };
+    let init_ix = ixn::initialize_checked(&stake_account.pubkey(), &auth);
     let msg = Message::new(&[init_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
@@ -61,16 +54,13 @@ async fn authorize_checked_staker_success() {
 
     // AuthorizeChecked for Staker (role=0). Old staker and new staker must sign.
     let new_staker = Keypair::new();
-    let auth_ix = Instruction {
-        program_id,
-        accounts: vec![
-            AccountMeta::new(stake_account.pubkey(), false),
-            AccountMeta::new_readonly(sysvar::clock::id(), false),
-            AccountMeta::new_readonly(staker.pubkey(), true),
-            AccountMeta::new_readonly(new_staker.pubkey(), true),
-        ],
-        data: vec![10u8, 0u8],
-    };
+    let auth_ix = ixn::authorize_checked(
+        &stake_account.pubkey(),
+        &staker.pubkey(),
+        &new_staker.pubkey(),
+        solana_sdk::stake::state::StakeAuthorize::Staker,
+        None,
+    );
     let msg = Message::new(&[auth_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &staker, &new_staker], ctx.last_blockhash).unwrap();

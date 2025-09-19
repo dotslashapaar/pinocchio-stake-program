@@ -20,13 +20,13 @@ pub fn process_split(accounts: &[AccountInfo], split_lamports: u64) -> ProgramRe
         return Err(ProgramError::NotEnoughAccountKeys);
     };
     msg!("Split: destructured accounts");
-    // Diagnostics for test shapes
+    // Trace key account flags
     if source_stake_account_info.is_signer() { msg!("Split: src signer=1"); } else { msg!("Split: src signer=0"); }
     if source_stake_account_info.is_writable() { msg!("Split: src writable=1"); } else { msg!("Split: src writable=0"); }
     if destination_stake_account_info.is_signer() { msg!("Split: dst signer=1"); } else { msg!("Split: dst signer=0"); }
     if destination_stake_account_info.is_writable() { msg!("Split: dst writable=1"); } else { msg!("Split: dst writable=0"); }
-    if *source_stake_account_info.owner() == crate::ID { msg!("Split: src owner ok"); } else { msg!("Split: src owner mismatch"); }
-    if *destination_stake_account_info.owner() == crate::ID { msg!("Split: dst owner ok"); } else { msg!("Split: dst owner mismatch"); }
+    if *source_stake_account_info.owner() == crate::ID { msg!("Split: src owner ok"); } else { msg!("Split: src owner mismatch"); return Err(ProgramError::InvalidAccountOwner); }
+    if *destination_stake_account_info.owner() == crate::ID { msg!("Split: dst owner ok"); } else { msg!("Split: dst owner mismatch"); return Err(ProgramError::InvalidAccountOwner); }
 
 
     let clock = Clock::get()?;

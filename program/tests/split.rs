@@ -1,6 +1,7 @@
 mod common;
 use common::*;
-use solana_sdk::{instruction::{AccountMeta, Instruction}, pubkey::Pubkey, system_instruction, message::Message};
+use common::pin_adapter as ixn;
+use solana_sdk::{pubkey::Pubkey, system_instruction, message::Message};
 
 #[tokio::test]
 async fn split_from_initialized_into_uninitialized() {
@@ -49,18 +50,9 @@ async fn split_from_initialized_into_uninitialized() {
     let dest_acc = ctx.banks_client.get_account(dest.pubkey()).await.unwrap().unwrap();
     eprintln!("test debug: dest owner={} expected={}, data_len={} space_dest={}", dest_acc.owner, program_id, dest_acc.data.len(), space_dest);
 
-    // Split: source (writable signer), destination (writable), third account unused
-    let mut data = vec![3u8]; // Split discriminant
-    data.extend_from_slice(&(split_lamports as u64).to_le_bytes());
-    let split_ix = Instruction {
-        program_id,
-        accounts: vec![
-            AccountMeta::new(source.pubkey(), true),
-            AccountMeta::new(dest.pubkey(), false),
-            AccountMeta::new_readonly(source.pubkey(), true),
-        ],
-        data,
-    };
+    // Split via adapter (authority = source for Uninitialized path)
+    // Use the stake-program split ix (3rd in the SDK-composed sequence)
+    let split_ix = ixn::split(&source.pubkey(), &source.pubkey(), split_lamports as u64, &dest.pubkey())[2].clone();
     let msg = Message::new(&[split_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &source], ctx.last_blockhash).unwrap();

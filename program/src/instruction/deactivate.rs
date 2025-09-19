@@ -2,7 +2,7 @@ use pinocchio::{
     account_info::AccountInfo,
     program_error::ProgramError,
     pubkey::Pubkey,
-    sysvars::{clock::Clock, Sysvar},
+    sysvars::clock::Clock,
     ProgramResult,
 };
 
@@ -10,7 +10,6 @@ use crate::{
     error::to_program_error,
     helpers::{collect_signers, get_stake_state, next_account_info, set_stake_state, MAXIMUM_SIGNERS},
     state::{stake_state_v2::StakeStateV2, StakeAuthorize},
-    ID,
 };
 
 pub fn process_deactivate(accounts: &[AccountInfo]) -> ProgramResult {
@@ -30,7 +29,7 @@ pub fn process_deactivate(accounts: &[AccountInfo]) -> ProgramResult {
     let clock = Clock::from_account_info(clock_ai)?;
 
     // 3) Load stake state (also checks program owner inside helper)
-    let mut state = get_stake_state(stake_ai)?;
+    let state = get_stake_state(stake_ai)?;
 
     // 4) Authorization + state transition
     match state {
@@ -44,6 +43,7 @@ pub fn process_deactivate(accounts: &[AccountInfo]) -> ProgramResult {
             stake
                 .deactivate(clock.epoch.to_le_bytes())
                 .map_err(to_program_error)?;
+            pinocchio::msg!("deactivate: set_epoch");
 
             // 5) Write back
             set_stake_state(stake_ai, &StakeStateV2::Stake(meta, stake, flags))?;

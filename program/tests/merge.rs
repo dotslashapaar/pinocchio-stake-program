@@ -1,10 +1,11 @@
 mod common;
 use common::*;
+use common::pin_adapter as ixn;
 use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
     message::Message,
     pubkey::Pubkey,
     system_instruction,
+    stake::state::Authorized,
 };
 
 async fn create_initialized_stake(
@@ -26,13 +27,11 @@ async fn create_initialized_stake(
     tx.try_sign(&[&ctx.payer, &kp], ctx.last_blockhash).unwrap();
     ctx.banks_client.process_transaction(tx).await.unwrap();
 
-    // InitializeChecked
-    let init_ix = Instruction { program_id: *program_id, accounts: vec![
-        AccountMeta::new(kp.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
-        AccountMeta::new_readonly(staker.pubkey(), false),
-        AccountMeta::new_readonly(withdrawer.pubkey(), true),
-    ], data: vec![9u8] };
+    // InitializeChecked via adapter
+    let init_ix = ixn::initialize_checked(
+        &kp.pubkey(),
+        &Authorized { staker: staker.pubkey(), withdrawer: withdrawer.pubkey() },
+    );
     let msg = Message::new(&[init_ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, withdrawer], ctx.last_blockhash).unwrap();
@@ -68,13 +67,10 @@ async fn merge_inactive_into_inactive_succeeds_and_drains_source() {
     let src_before = ctx.banks_client.get_account(src.pubkey()).await.unwrap().unwrap();
 
     // Merge: [dst, src, clock, stake_history, staker signer]
-    let ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(dst.pubkey(), false),
-        AccountMeta::new(src.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
-        AccountMeta::new_readonly(staker.pubkey(), true),
-    ], data: vec![7u8] };
+    let ix = ixn::merge(&dst.pubkey(), &src.pubkey(), &staker.pubkey())
+        .into_iter()
+        .next()
+        .unwrap();
     let msg = Message::new(&[ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &staker], ctx.last_blockhash).unwrap();
@@ -105,13 +101,12 @@ async fn merge_missing_staker_signature_fails() {
     let dst = create_initialized_stake(&mut ctx, &program_id, &staker, &withdrawer, 0).await;
     let src = create_initialized_stake(&mut ctx, &program_id, &staker, &withdrawer, 0).await;
 
-    let ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(dst.pubkey(), false),
-        AccountMeta::new(src.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
-        // no staker signer
-    ], data: vec![7u8] };
+    let mut ix = ixn::merge(&dst.pubkey(), &src.pubkey(), &staker.pubkey())
+        .into_iter()
+        .next()
+        .unwrap();
+    // remove staker signer to assert signature failure path is handled
+    ix.accounts.retain(|am| am.pubkey != staker.pubkey());
     let msg = Message::new(&[ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer], ctx.last_blockhash).unwrap();
@@ -140,13 +135,10 @@ async fn merge_authority_mismatch_fails() {
     let dst = create_initialized_stake(&mut ctx, &program_id, &staker_a, &withdrawer_a, 0).await;
     let src = create_initialized_stake(&mut ctx, &program_id, &staker_b, &withdrawer_b, 0).await;
 
-    let ix = Instruction { program_id, accounts: vec![
-        AccountMeta::new(dst.pubkey(), false),
-        AccountMeta::new(src.pubkey(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::clock::id(), false),
-        AccountMeta::new_readonly(solana_sdk::sysvar::stake_history::id(), false),
-        AccountMeta::new_readonly(staker_a.pubkey(), true), // destination staker signer
-    ], data: vec![7u8] };
+    let ix = ixn::merge(&dst.pubkey(), &src.pubkey(), &staker_a.pubkey())
+        .into_iter()
+        .next()
+        .unwrap();
     let msg = Message::new(&[ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
     tx.try_sign(&[&ctx.payer, &staker_a], ctx.last_blockhash).unwrap();

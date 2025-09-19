@@ -1,5 +1,5 @@
 
-use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramResult};
+use pinocchio::{account_info::AccountInfo, program_error::ProgramError, ProgramResult, sysvars::Sysvar};
 
 use crate::error::{to_program_error, StakeError};
 use crate::helpers::{
@@ -23,13 +23,41 @@ pub fn process_move_stake(accounts: &[AccountInfo], lamports: u64) -> ProgramRes
     let destination_stake_account_info = next_account_info(it)?;
     let stake_authority_info = next_account_info(it)?;
 
+    // Debug: verify signer status seen by runtime
+    if stake_authority_info.is_signer() {
+    } else {
+    }
+
+    // Early: Uninitialized on either side is invalid for MoveStake
+    if let Ok(state) = get_stake_state(source_stake_account_info) {
+        if let StakeStateV2::Uninitialized = state {
+            return Err(ProgramError::InvalidAccountData);
+        }
+    }
+    if let Ok(state) = get_stake_state(destination_stake_account_info) {
+        if let StakeStateV2::Uninitialized = state {
+            return Err(ProgramError::InvalidAccountData);
+        }
+    }
+
     // Shared checks + classification (auth, writable, nonzero, compatible metas)
     let (source_kind, destination_kind) = move_stake_or_lamports_shared_checks(
         source_stake_account_info,
         lamports,
         destination_stake_account_info,
         stake_authority_info,
+        true,  // need meta compat for stake
+        true,  // require mergeable classification
     )?;
+
+    // Additional explicit guard (post-signer-check): destination must not be deactivating
+    if let Ok(StakeStateV2::Stake(_, stake, _)) = get_stake_state(destination_stake_account_info) {
+        let deact = bytes_to_u64(stake.delegation.deactivation_epoch);
+        let clock = pinocchio::sysvars::clock::Clock::get()?;
+        if deact != u64::MAX && clock.epoch <= deact {
+            return Err(crate::error::to_program_error(crate::error::StakeError::MergeMismatch));
+        }
+    }
 
     // Native safeguard: require exact account data size
     if source_stake_account_info.data_len() != StakeStateV2::size_of()
@@ -40,7 +68,7 @@ pub fn process_move_stake(accounts: &[AccountInfo], lamports: u64) -> ProgramRes
 
     // Source must be fully active
     let MergeKind::FullyActive(source_meta, mut source_stake) = source_kind else {
-        return Err(ProgramError::InvalidAccountData);
+        return Err(crate::error::to_program_error(crate::error::StakeError::MergeMismatch));
     };
 
     let minimum_delegation = get_minimum_delegation();
@@ -105,7 +133,7 @@ pub fn process_move_stake(accounts: &[AccountInfo], lamports: u64) -> ProgramRes
 
             destination_meta
         }
-        _ => return Err(ProgramError::InvalidAccountData),
+        _ => return Err(crate::error::to_program_error(crate::error::StakeError::MergeMismatch)),
     };
 
     // write back source: either to Initialized(meta) if emptied, or Stake with reduced stake

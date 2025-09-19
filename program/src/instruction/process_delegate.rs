@@ -68,6 +68,14 @@ pub fn process_delegate(accounts: &[AccountInfo]) -> ProgramResult {
             let ValidatedDelegatedInfo { stake_amount } =
                 validate_delegated_amount(stake_account_info, &meta)?;
 
+            // If deactivation is scheduled and target vote differs, reject (TooSoon)
+            // Pre-check: if deactivating, only allow redelegation to the same vote
+            let current_voter = stake.delegation.voter_pubkey;
+            let deact_epoch = crate::helpers::bytes_to_u64(stake.delegation.deactivation_epoch);
+            if deact_epoch != u64::MAX && current_voter != *vote_account_info.key() {
+                return Err(to_program_error(crate::error::StakeError::TooSoonToRedelegate));
+            }
+
             // Let helper update stake state (possible rescind or re-delegate)
             redelegate_stake_with_credits(
                 &mut stake,

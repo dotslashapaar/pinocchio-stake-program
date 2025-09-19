@@ -86,14 +86,18 @@ pub fn process_withdraw(accounts: &[AccountInfo], withdraw_lamports: u64) -> Pro
 
             // Convert little-endian fields to u64
             let deact_epoch = u64::from_le_bytes(stake.delegation.deactivation_epoch);
-            let staked: u64 = if clock.epoch >= deact_epoch {
-                // Delegation::stake expects little-endian epoch + rate
+            // During the deactivation epoch, stake is still fully effective for withdrawal rules
+            let staked: u64 = if deact_epoch != u64::MAX && clock.epoch == deact_epoch {
+                u64::from_le_bytes(stake.delegation.stake)
+            } else if deact_epoch != u64::MAX && clock.epoch > deact_epoch {
+                // After deactivation epoch, consult history to compute remaining effective
                 stake.delegation.stake(
                     clock.epoch.to_le_bytes(),
                     stake_history,
                     crate::helpers::PERPETUAL_NEW_WARMUP_COOLDOWN_RATE_EPOCH,
                 )
             } else {
+                // Not deactivating
                 u64::from_le_bytes(stake.delegation.stake)
             };
 

@@ -1,5 +1,7 @@
 mod common;
 use common::*;
+use common::pin_adapter as ixn;
+use solana_sdk::stake::state::Authorized;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     message::Message,
@@ -38,17 +40,9 @@ async fn move_lamports_from_inactive_source() {
         tx.try_sign(&[&ctx.payer, kp], ctx.last_blockhash).unwrap();
         ctx.banks_client.process_transaction(tx).await.unwrap();
 
-        // InitializeChecked to set authorities
-        let init_ix = Instruction {
-            program_id,
-            accounts: vec![
-                AccountMeta::new(kp.pubkey(), false),
-                AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
-                AccountMeta::new_readonly(staker.pubkey(), false),
-                AccountMeta::new_readonly(withdrawer.pubkey(), true),
-            ],
-            data: vec![9u8],
-        };
+        // InitializeChecked to set authorities (use adapter)
+        let auth = Authorized { staker: staker.pubkey(), withdrawer: withdrawer.pubkey() };
+        let init_ix = ixn::initialize_checked(&kp.pubkey(), &auth);
         let msg = Message::new(&[init_ix], Some(&ctx.payer.pubkey()));
         let mut tx = Transaction::new_unsigned(msg);
         tx.try_sign(&[&ctx.payer, &withdrawer], ctx.last_blockhash).unwrap();
@@ -87,18 +81,8 @@ async fn move_lamports_from_inactive_source() {
 
     let amount = extra / 2; // should be <= free lamports
 
-    // Build MoveLamports instruction: [disc=17][u64 amount]
-    let mut data = vec![17u8];
-    data.extend_from_slice(&amount.to_le_bytes());
-    let ix = Instruction {
-        program_id,
-        accounts: vec![
-            AccountMeta::new(source.pubkey(), false),
-            AccountMeta::new(dest.pubkey(), false),
-            AccountMeta::new_readonly(staker.pubkey(), true), // staker must sign per native policy
-        ],
-        data,
-    };
+    // Build MoveLamports via adapter (re-encodes data and accounts)
+    let ix = ixn::move_lamports(&source.pubkey(), &dest.pubkey(), &staker.pubkey(), amount);
 
     let msg = Message::new(&[ix], Some(&ctx.payer.pubkey()));
     let mut tx = Transaction::new_unsigned(msg);
@@ -125,4 +109,3 @@ async fn move_lamports_from_inactive_source() {
     assert_eq!(src_before - amount, src_after);
     assert_eq!(dst_before + amount, dst_after);
 }
-

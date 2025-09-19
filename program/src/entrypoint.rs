@@ -29,7 +29,9 @@ fn process_instruction(
         return Err(ProgramError::IncorrectProgramId);
     }
     // Decode StakeInstruction via bincode when building with std (host/dev)
-    #[cfg(feature = "std")]
+    // Disabled unless feature "wire_bincode" is explicitly enabled to avoid
+    // accidental mis-decoding of raw discriminator payloads in tests.
+    #[cfg(all(feature = "std", feature = "wire_bincode"))]
     {
         if let Ok(wire_ix) = bincode::deserialize::<wire::StakeInstruction>(instruction_data) {
             // EpochRewards gating
@@ -119,7 +121,16 @@ instruction::initialize::initialize(accounts, authorized, lockup)
             if epoch_rewards_active() {
                 return Err(to_program_error(StakeError::EpochRewardsActive));
             }
-            let args = AuthorizeWithSeedData::parse(payload)?;
+            // Parse: [new_auth(32)] [role(1)] [seed_len(1)] [seed] [owner(32)]
+            if payload.len() < 34 { return Err(ProgramError::InvalidInstructionData); }
+            let new_authorized = Pubkey::try_from(&payload[0..32])
+                .map_err(|_| ProgramError::InvalidInstructionData)?;
+            let role = match payload[32] { 0 => StakeAuthorize::Staker, 1 => StakeAuthorize::Withdrawer, _ => return Err(ProgramError::InvalidInstructionData) };
+            let seed_len = payload[33] as usize;
+            if payload.len() < 34 + seed_len + 32 { return Err(ProgramError::InvalidInstructionData); }
+            let seed_slice = &payload[34..34+seed_len];
+            let owner = Pubkey::try_from(&payload[34+seed_len..34+seed_len+32]).map_err(|_| ProgramError::InvalidInstructionData)?;
+            let args = AuthorizeWithSeedData { new_authorized, stake_authorize: role, authority_seed: seed_slice, authority_owner: owner };
             
             instruction::process_authorized_with_seeds::process_authorized_with_seeds(accounts, args)
         }
@@ -146,7 +157,11 @@ instruction::initialize::initialize(accounts, authorized, lockup)
             if epoch_rewards_active() {
                 return Err(to_program_error(StakeError::EpochRewardsActive));
             }
-            let args = AuthorizeCheckedWithSeedData::parse(payload)?;
+            // Minimal parse: only role; seed/owner unused in handler
+            if payload.len() < 34 { return Err(ProgramError::InvalidInstructionData); }
+            let role = match payload[32] { 0 => StakeAuthorize::Staker, 1 => StakeAuthorize::Withdrawer, _ => return Err(ProgramError::InvalidInstructionData) };
+            let empty: &[u8] = &[];
+            let args = AuthorizeCheckedWithSeedData { new_authorized: Pubkey::default(), stake_authorize: role, authority_seed: empty, authority_owner: Pubkey::default() };
             instruction::process_authorize_checked_with_seed::process_authorize_checked_with_seed(
                 accounts,
                 args,

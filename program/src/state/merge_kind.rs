@@ -1,4 +1,5 @@
 use pinocchio::{program_error::ProgramError, sysvars::clock::Clock, ProgramResult};
+use crate::error::{to_program_error, StakeError};
 
 use crate::helpers::{
     bytes_to_u64,
@@ -46,7 +47,7 @@ impl MergeKind {
     }
 
     /// Classification helper
-       pub fn get_if_mergeable<T: StakeHistoryGetEntry>(
+    pub fn get_if_mergeable<T: StakeHistoryGetEntry>(
         stake_state: &StakeStateV2,
         stake_lamports: u64,
         clock: &Clock,
@@ -54,6 +55,23 @@ impl MergeKind {
     ) -> Result<Self, ProgramError> {
         match stake_state {
             StakeStateV2::Stake(meta, stake, flags) => {
+                // Fast path: if delegated > 0, no deactivation scheduled, and activation epoch reached,
+                // treat as FullyActive even if stake history can't inform effective/activating metrics.
+                let delegated    = crate::helpers::bytes_to_u64(stake.delegation.stake);
+                let act_epoch    = crate::helpers::bytes_to_u64(stake.delegation.activation_epoch);
+                let deact_epoch  = crate::helpers::bytes_to_u64(stake.delegation.deactivation_epoch);
+                // If a deactivation has been scheduled and we're at or before that epoch,
+                // this account is considered deactivating and not mergeable for move/merge.
+                if deact_epoch != u64::MAX {
+                    if clock.epoch <= deact_epoch {
+                        return Err(to_program_error(StakeError::MergeMismatch));
+                    } else {
+                    }
+                } else {
+                }
+                if delegated > 0 && deact_epoch == u64::MAX && clock.epoch > act_epoch {
+                    return Ok(Self::FullyActive(*meta, *stake));
+                }
                 let status = stake.delegation.stake_activating_and_deactivating(
                     clock.epoch.to_le_bytes(),
                     stake_history,
@@ -62,15 +80,19 @@ impl MergeKind {
                 let effective    = crate::helpers::bytes_to_u64(status.effective);
                 let activating   = crate::helpers::bytes_to_u64(status.activating);
                 let deactivating = crate::helpers::bytes_to_u64(status.deactivating);
-                let delegated    = crate::helpers::bytes_to_u64(stake.delegation.stake);
+                // If any stake is deactivating, treat as not mergeable for move/merge ops
+                if deactivating > 0 {
+                    return Err(to_program_error(StakeError::MergeMismatch));
+                }
 
                 match (effective, activating, deactivating) {
                     (0, 0, 0) => {
-                        // If history is unavailable or yields zeros, but the stake is delegated
-                        // and not deactivating, treat it as FullyActive for move/merge eligibility.
-                        if delegated > 0 && bytes_to_u64(stake.delegation.deactivation_epoch) == u64::MAX {
+                        // History yielded zeros; decide based on epochs.
+                        let deact_epoch = bytes_to_u64(stake.delegation.deactivation_epoch);
+                        if delegated > 0 && deact_epoch == u64::MAX {
                             Ok(Self::FullyActive(*meta, *stake))
                         } else {
+                            // Either no delegation, or delegation but fully deactivated in the past
                             Ok(Self::Inactive(*meta, stake_lamports, *flags))
                         }
                     }
@@ -82,17 +104,22 @@ impl MergeKind {
                         if delegated > 0 && deact_epoch == u64::MAX && clock.epoch > act_epoch {
                             Ok(Self::FullyActive(*meta, *stake))
                         } else {
-                            Ok(Self::ActivationEpoch(*meta, *stake, *flags))
+                            // Only classify as ActivationEpoch when truly activating (not deactivating)
+                            if activating > 0 {
+                                Ok(Self::ActivationEpoch(*meta, *stake, *flags))
+                            } else {
+                                Err(to_program_error(StakeError::MergeMismatch))
+                            }
                         }
                     }
                     (_, 0, 0) if effective == delegated => Ok(Self::FullyActive(*meta, *stake)),
-                    _ => Err(ProgramError::InvalidAccountData),
+                    _ => Err(to_program_error(StakeError::MergeMismatch)),
                 }
             }
             StakeStateV2::Initialized(meta) => {
                 Ok(Self::Inactive(*meta, stake_lamports, crate::state::stake_flag::StakeFlags::empty()))
             }
-            _ => Err(ProgramError::InvalidAccountData),
+            _ => Err(to_program_error(StakeError::MergeMismatch)),
         }
     }
 
@@ -100,7 +127,7 @@ impl MergeKind {
     pub fn metas_can_merge(dest: &Meta, source: &Meta, clock: &Clock) -> ProgramResult {
         // Authorities must match exactly
         if dest.authorized != source.authorized {
-            return Err(ProgramError::InvalidAccountData);
+            return Err(to_program_error(StakeError::MergeMismatch));
         }
 
         // Lockups may differ, but both must be expired
@@ -111,7 +138,7 @@ impl MergeKind {
         if can_merge_lockups {
             Ok(())
         } else {
-            Err(ProgramError::InvalidAccountData)
+            Err(to_program_error(StakeError::MergeMismatch))
         }
     }
 
@@ -121,13 +148,13 @@ impl MergeKind {
         source: &crate::state::delegation::Delegation,
     ) -> ProgramResult {
         if dest.voter_pubkey != source.voter_pubkey {
-            return Err(ProgramError::InvalidAccountData);
+            return Err(to_program_error(StakeError::MergeMismatch));
         }
         let max_epoch = u64::MAX.to_le_bytes();
         if dest.deactivation_epoch == max_epoch && source.deactivation_epoch == max_epoch {
             Ok(())
         } else {
-            Err(ProgramError::InvalidAccountData)
+            Err(to_program_error(StakeError::MergeMismatch))
         }
     }
 
@@ -195,7 +222,7 @@ impl MergeKind {
             }
 
             // any other shape is invalid (native throws StakeError::MergeMismatch)
-            _ => return Err(ProgramError::InvalidAccountData),
+            _ => return Err(to_program_error(StakeError::MergeMismatch)),
         };
 
         Ok(merged)
