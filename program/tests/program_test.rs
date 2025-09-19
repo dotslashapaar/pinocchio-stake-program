@@ -1,3 +1,5 @@
+#![cfg(feature = "e2e")]
+
 use {
     solana_program_test::*,
     solana_sdk::{

@@ -1,3 +1,4 @@
+#![cfg(feature = "seed")]
 mod common;
 use common::*;
 use common::pin_adapter as ixn;
@@ -166,3 +167,4 @@ async fn authorize_with_seed_staker_success() {
         other => panic!("unexpected state after authorize_with_seed: {:?}", other),
     }
 }
+
