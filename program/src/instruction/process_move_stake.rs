@@ -23,7 +23,7 @@ pub fn process_move_stake(accounts: &[AccountInfo], lamports: u64) -> ProgramRes
     let destination_stake_account_info = next_account_info(it)?;
     let stake_authority_info = next_account_info(it)?;
 
-    // Debug: verify signer status seen by runtime
+    // Verify signer status is provided by the runtime
     if stake_authority_info.is_signer() {
     } else {
     }
