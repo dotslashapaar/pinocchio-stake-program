@@ -190,6 +190,10 @@ pub mod ixn {
                 solana_sdk::stake::config::id(),
             ],
         );
+        // Ensure stake_config is present (some SDKs may omit it from delegate metas)
+        if !accts.iter().any(|am| am.pubkey == solana_sdk::stake::config::id()) {
+            accts.push(AccountMeta::new_readonly(solana_sdk::stake::config::id(), false));
+        }
         ix.accounts = accts;
         ix.data = vec![2];
         ix
